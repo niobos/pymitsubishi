@@ -10,9 +10,7 @@ import pytest
 from pymitsubishi import SensorStates
 from pymitsubishi.mitsubishi_parser import (
     calc_fcc,
-    PowerOnOff, DriveMode, WindSpeed,
-    VerticalWindDirection, HorizontalWindDirection,
-    parse_code_values, GeneralStates, ParsedDeviceState, generate_extend08_command,
+    parse_code_values, GeneralStates, ParsedDeviceState,
 )
 
 from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
@@ -37,7 +35,7 @@ def test_generate_general_command():
     assert command == "fc410130100100020000090000000000000000ac4185"
 
 def test_generate_extend08_command():
-    command = generate_extend08_command(GeneralStates(), {})
+    command = GeneralStates().generate_extend08_command({})
     assert command == "fc410130100800000000000000000000000000000076"
 
 def test_parse_sensor_states():

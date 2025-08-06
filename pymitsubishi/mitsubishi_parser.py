@@ -34,20 +34,8 @@ class DriveMode(Enum):
     AUTO_HEATER = 0x19
     FAN = 7
 
-    @classmethod
-    def from_segment(cls, segment: int) -> DriveMode:
-        mode_map = {
-            0x03: DriveMode.COOLER, 0x0b: DriveMode.COOLER,
-            0x01: DriveMode.HEATER, 0x09: DriveMode.HEATER,
-            0x08: DriveMode.AUTO,
-            0x00: DriveMode.DEHUM, 0x02: DriveMode.DEHUM, 0x0a: DriveMode.DEHUM, 0x0c: DriveMode.DEHUM,
-            0x1b: DriveMode.AUTO_COOLER,
-            0x19: DriveMode.AUTO_HEATER,
-        }
-        return mode_map.get(segment, DriveMode.FAN)
-
 class WindSpeed(int):
-    ...
+    pass
 
 class VerticalWindDirection(Enum):
     AUTO = 0
@@ -154,9 +142,68 @@ class GeneralStates:
             obj.wind_and_wind_break_direct = None
 
         # Analyze undocumented bits for research purposes
-        obj.undocumented_analysis = analyze_undocumented_bits(payload)
+        obj.undocumented_analysis = cls.analyze_undocumented_bits(payload)
 
         return obj
+
+    @staticmethod
+    def analyze_undocumented_bits(payload: str) -> Dict[str, Any]:
+        """Analyze payload for undocumented bit patterns and flags
+
+        This function helps identify unknown functionality by examining
+        bit patterns that haven't been documented yet.
+        """
+        analysis = {
+            'payload_length': len(payload),
+            'suspicious_patterns': [],
+            'high_bits_set': [],
+            'unknown_segments': {}
+        }
+
+        if len(payload) < 42:
+            return analysis
+
+        try:
+            # Examine each byte for unusual patterns
+            for i in range(0, min(len(payload), 42), 2):
+                if i + 2 <= len(payload):
+                    byte_hex = payload[i:i+2]
+                    byte_val = int(byte_hex, 16)
+                    position = i // 2
+
+                    # Look for high bits that might indicate additional flags
+                    if byte_val & 0x80:  # High bit set
+                        analysis['high_bits_set'].append({
+                            'position': position,
+                            'hex': byte_hex,
+                            'value': byte_val,
+                            'binary': f"{byte_val:08b}"
+                        })
+
+                    # Look for patterns that don't match known mappings
+                    if position == 9:  # Mode byte position
+                        if byte_val not in [0x00, 0x01, 0x02, 0x03, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x19, 0x1b]:
+                            analysis['suspicious_patterns'].append({
+                                'type': 'unknown_mode',
+                                'position': position,
+                                'hex': byte_hex,
+                                'value': byte_val,
+                                'possible_i_see': byte_val > 0x08
+                            })
+
+                    # Check for non-zero values in typically unused positions
+                    unused_positions = [12, 17, 19]  # Add more as we discover them
+                    if position in unused_positions and byte_val != 0:
+                        analysis['unknown_segments'][position] = {
+                            'hex': byte_hex,
+                            'value': byte_val,
+                            'binary': f"{byte_val:08b}"
+                        }
+
+        except (ValueError, IndexError) as e:
+            analysis['parse_error'] = str(e)
+
+        return analysis
 
     def generate_general_command(self, controls: Dict[str, bool]) -> str:
         """Generate general control command hex string"""
@@ -215,6 +262,28 @@ class GeneralStates:
         # Calculate and append FCC
         fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
         return "fc" + payload + fcc
+
+    def generate_extend08_command(self: GeneralStates, controls: Dict[str, bool]) -> str:
+        """Generate extend08 command for buzzer, dehum, power saving, etc."""
+        segment_x_value = 0
+        if controls.get('dehum'):
+            segment_x_value |= 0x04
+        if controls.get('power_saving'):
+            segment_x_value |= 0x08
+        if controls.get('buzzer'):
+            segment_x_value |= 0x10
+        if controls.get('wind_and_wind_break'):
+            segment_x_value |= 0x20
+
+        segment_x = f"{segment_x_value:02x}"
+        segment_y = f"{self.dehum_setting:02x}" if controls.get('dehum') else '00'
+        segment_z = '0A' if self.is_power_saving else '00'
+        segment_a = f"{self.wind_and_wind_break_direct:02x}" if controls.get('wind_and_wind_break') else '00'
+        buzzer_segment = '01' if controls.get('buzzer') else '00'
+
+        payload = "4101301008" + segment_x + "0000" + segment_y + segment_z + segment_a + buzzer_segment + "0000000000000000"
+        fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
+        return 'fc' + payload + fcc
 
     @staticmethod
     def _from_coarse_temperature(value: int) -> int:
@@ -437,64 +506,6 @@ def calc_fcc(payload: bytes) -> int:
     """Calculate FCC checksum for Mitsubishi protocol payload"""
     return 0x100 - (sum(payload[0:20]) % 0x100)  # TODO: do we actually need to limit this to 20 bytes?
 
-def analyze_undocumented_bits(payload: str) -> Dict[str, Any]:
-    """Analyze payload for undocumented bit patterns and flags
-    
-    This function helps identify unknown functionality by examining
-    bit patterns that haven't been documented yet.
-    """
-    analysis = {
-        'payload_length': len(payload),
-        'suspicious_patterns': [],
-        'high_bits_set': [],
-        'unknown_segments': {}
-    }
-    
-    if len(payload) < 42:
-        return analysis
-    
-    try:
-        # Examine each byte for unusual patterns
-        for i in range(0, min(len(payload), 42), 2):
-            if i + 2 <= len(payload):
-                byte_hex = payload[i:i+2]
-                byte_val = int(byte_hex, 16)
-                position = i // 2
-                
-                # Look for high bits that might indicate additional flags
-                if byte_val & 0x80:  # High bit set
-                    analysis['high_bits_set'].append({
-                        'position': position,
-                        'hex': byte_hex,
-                        'value': byte_val,
-                        'binary': f"{byte_val:08b}"
-                    })
-                
-                # Look for patterns that don't match known mappings
-                if position == 9:  # Mode byte position
-                    if byte_val not in [0x00, 0x01, 0x02, 0x03, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x19, 0x1b]:
-                        analysis['suspicious_patterns'].append({
-                            'type': 'unknown_mode',
-                            'position': position,
-                            'hex': byte_hex,
-                            'value': byte_val,
-                            'possible_i_see': byte_val > 0x08
-                        })
-                
-                # Check for non-zero values in typically unused positions
-                unused_positions = [12, 17, 19]  # Add more as we discover them
-                if position in unused_positions and byte_val != 0:
-                    analysis['unknown_segments'][position] = {
-                        'hex': byte_hex,
-                        'value': byte_val,
-                        'binary': f"{byte_val:08b}"
-                    }
-        
-    except (ValueError, IndexError) as e:
-        analysis['parse_error'] = str(e)
-    
-    return analysis
-
 def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_speed: WindSpeed) -> float:
     """Estimate power consumption based on compressor frequency and operational parameters
     
@@ -574,25 +585,3 @@ def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
             parsed_state.energy = EnergyStates.deserialize(value, parsed_state.general)
     
     return parsed_state
-
-def generate_extend08_command(general_states: GeneralStates, controls: Dict[str, bool]) -> str:
-    """Generate extend08 command for buzzer, dehum, power saving, etc."""
-    segment_x_value = 0
-    if controls.get('dehum'):
-        segment_x_value |= 0x04
-    if controls.get('power_saving'):
-        segment_x_value |= 0x08
-    if controls.get('buzzer'):
-        segment_x_value |= 0x10
-    if controls.get('wind_and_wind_break'):
-        segment_x_value |= 0x20
-    
-    segment_x = f"{segment_x_value:02x}"
-    segment_y = f"{general_states.dehum_setting:02x}" if controls.get('dehum') else '00'
-    segment_z = '0A' if general_states.is_power_saving else '00'
-    segment_a = f"{general_states.wind_and_wind_break_direct:02x}" if controls.get('wind_and_wind_break') else '00'
-    buzzer_segment = '01' if controls.get('buzzer') else '00'
-    
-    payload = "4101301008" + segment_x + "0000" + segment_y + segment_z + segment_a + buzzer_segment + "0000000000000000"
-    fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
-    return 'fc' + payload + fcc

@@ -14,7 +14,7 @@ from .mitsubishi_api import MitsubishiAPI
 from .mitsubishi_parser import (
     PowerOnOff, DriveMode, WindSpeed, VerticalWindDirection,
     HorizontalWindDirection, GeneralStates, ParsedDeviceState,
-    parse_code_values, generate_extend08_command,
+    parse_code_values,
 )
 from .mitsubishi_capabilities import CapabilityDetector, DeviceCapabilities
 
@@ -281,7 +281,7 @@ class MitsubishiController:
     def _send_extend08_command(self, state: GeneralStates, controls: Dict[str, bool]) -> bool:
         """Send an extend08 command for advanced features"""
         # Generate the hex command
-        hex_command = generate_extend08_command(state, controls)
+        hex_command = state.generate_extend08_command(controls)
         
         logger.debug(f"🔧 Sending extend08 command: {hex_command}")
             
