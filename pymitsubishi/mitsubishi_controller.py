@@ -158,11 +158,11 @@ class MitsubishiController:
         """Create updated state with specified field overrides"""
         return GeneralStates(
             power_on_off=overrides.get('power_on_off', self.state.general.power_on_off),
-            temperature=overrides.get('temperature', self.state.general.temperature),
+            coarse_temperature=overrides.get('temperature', self.state.general.coarse_temperature),
+            fine_temperature=overrides.get('temperature', self.state.general.fine_temperature),
             drive_mode=overrides.get('drive_mode', self.state.general.drive_mode),
             wind_speed=overrides.get('wind_speed', self.state.general.wind_speed),
-            vertical_wind_direction_right=overrides.get('vertical_wind_direction_right', self.state.general.vertical_wind_direction_right),
-            vertical_wind_direction_left=overrides.get('vertical_wind_direction_left', self.state.general.vertical_wind_direction_left),
+            vertical_wind_direction=overrides.get('vertical_wind_direction', self.state.general.vertical_wind_direction),
             horizontal_wind_direction=overrides.get('horizontal_wind_direction', self.state.general.horizontal_wind_direction),
             dehum_setting=overrides.get('dehum_setting', self.state.general.dehum_setting),
             is_power_saving=overrides.get('is_power_saving', self.state.general.is_power_saving),
