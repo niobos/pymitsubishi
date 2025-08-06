@@ -29,7 +29,10 @@ class DriveMode(Enum):
     FAN = 7
 
 class WindSpeed(int):
-    pass
+    def __repr__(self):
+        if self == 0:
+            return "<WindSpeed.AUTO: 0>"
+        return f"<WindSpeed.S{int(self)}: {int(self)}"
 
 class VerticalWindDirection(Enum):
     AUTO = 0
@@ -69,7 +72,6 @@ class GeneralStates:
     # Enhanced functionality based on SwiCago insights
     i_see_sensor: bool = False  # i-See sensor active flag
     wide_vane_adjustment: bool = False  # Wide vane adjustment flag (SwiCago wideVaneAdj)
-    temp_mode: bool = False     # Direct temperature mode flag (SwiCago tempMode)
 
     @staticmethod
     def is_general_states_payload(data: bytes) -> bool:
@@ -102,7 +104,6 @@ class GeneralStates:
         obj._unknown9 = data[9] & 0xF0
 
         obj.coarse_temperature = cls._from_coarse_temperature(data[10])
-
         obj.wind_speed = WindSpeed(data[11])
         obj.vertical_wind_direction = VerticalWindDirection(data[12])
 
@@ -113,11 +114,8 @@ class GeneralStates:
         obj.wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
 
         obj.fine_temperature = cls._from_fine_temperature(data[16])
-
         obj.dehum_setting = data[17]
-
         obj.is_power_saving = data[18] > 0
-
         obj.wind_and_wind_break_direct = data[19]
 
         obj._unknown20 = data[20:]
@@ -146,18 +144,18 @@ class GeneralStates:
             control_flags2 |= 0x02
 
         # Build payload
-        payload = b'\x41\x01\x30\x10\x01'
-        payload += control_flags.to_bytes(1)
-        payload += control_flags2.to_bytes(1)
-        payload += self.power_on_off.value.to_bytes(1)
-        payload += self.drive_mode.value.to_bytes(1)
-        payload += self._to_coarse_temperature(self.coarse_temperature).to_bytes(1)
-        payload += self.wind_speed.to_bytes(1)
-        payload += self.vertical_wind_direction.value.to_bytes(1)
-        payload += b'\0' * 5
-        payload += self.horizontal_wind_direction.value.to_bytes(1)
-        payload += self._to_fine_temperature(self.fine_temperature).to_bytes(1)
-        payload += b'\x41'
+        payload = b'\x41\x01\x30\x10\x01'  # 0:5
+        payload += control_flags.to_bytes(1)  # 5
+        payload += control_flags2.to_bytes(1)  # 6
+        payload += self.power_on_off.value.to_bytes(1)  # 7
+        payload += self.drive_mode.value.to_bytes(1)  # 8
+        payload += self._to_coarse_temperature(self.coarse_temperature).to_bytes(1)  # 9
+        payload += self.wind_speed.to_bytes(1)  # 10
+        payload += self.vertical_wind_direction.value.to_bytes(1)  # 11
+        payload += b'\0' * 5  # 12:17
+        payload += self.horizontal_wind_direction.value.to_bytes(1)  # 17
+        payload += self._to_fine_temperature(self.fine_temperature).to_bytes(1)  # 18
+        payload += b'\x41'  # 19
 
         # Calculate and append FCC
         fcc = calc_fcc(payload).to_bytes(1)
@@ -175,14 +173,14 @@ class GeneralStates:
         if controls.get('wind_and_wind_break'):
             segment_x_value |= 0x20
 
-        payload = b"\x41\x01\x30\x10\x08"
-        payload += segment_x_value.to_bytes(1)
-        payload += b"\0\0"
-        payload += (self.dehum_setting if controls.get('dehum') else 0).to_bytes(1)
-        payload += b'\x0a' if self.is_power_saving else b'\x00'
-        payload += (self.wind_and_wind_break_direct if controls.get('wind_and_wind_break') else 0).to_bytes(1)
-        payload += b'\x01' if controls.get('buzzer') else b'\x00'
-        payload += b"\x00" * 8
+        payload = b"\x41\x01\x30\x10\x08"  # 0:5
+        payload += segment_x_value.to_bytes(1)  # 5
+        payload += b"\0\0"  # 6:8
+        payload += (self.dehum_setting if controls.get('dehum') else 0).to_bytes(1)  # 8
+        payload += b'\x0a' if self.is_power_saving else b'\x00'  # 9
+        payload += (self.wind_and_wind_break_direct if controls.get('wind_and_wind_break') else 0).to_bytes(1)  # 10
+        payload += b'\x01' if controls.get('buzzer') else b'\x00'  # 11
+        payload += b"\x00" * 8  # 12:20
         fcc = calc_fcc(payload).to_bytes(1)
         return b'\xfc' + payload + fcc
 
