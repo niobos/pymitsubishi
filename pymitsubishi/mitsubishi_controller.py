@@ -14,7 +14,6 @@ from .mitsubishi_api import MitsubishiAPI
 from .mitsubishi_parser import (
     PowerOnOff, DriveMode, WindSpeed, VerticalWindDirection,
     HorizontalWindDirection, GeneralStates, ParsedDeviceState,
-    parse_code_values,
 )
 from .mitsubishi_capabilities import CapabilityDetector, DeviceCapabilities
 
@@ -58,7 +57,7 @@ class MitsubishiController:
             code_values = [bytes.fromhex(elem.text) for elem in code_values_elems if elem.text]
             
             # Use the parser module to get structured state
-            parsed_state = parse_code_values(code_values)
+            parsed_state = ParsedDeviceState.parse_code_values(code_values)
             
             if parsed_state:
                 self.state = parsed_state

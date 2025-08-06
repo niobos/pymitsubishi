@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 from pymitsubishi import MitsubishiAPI, MitsubishiController
 from pymitsubishi.mitsubishi_parser import (
-    parse_code_values, DriveMode, WindSpeed, PowerOnOff,
+    DriveMode, WindSpeed, PowerOnOff,
     VerticalWindDirection, HorizontalWindDirection
 )
 from pymitsubishi.mitsubishi_capabilities import CapabilityDetector

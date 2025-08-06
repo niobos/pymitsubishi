@@ -14,12 +14,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from pymitsubishi import MitsubishiAPI
-
-# Temperature constants
-MIN_TEMPERATURE = 160  # 16.0°C in 0.1°C units
-MAX_TEMPERATURE = 310  # 31.0°C in 0.1°C units
-
 class PowerOnOff(Enum):
     OFF = 0
     ON = 1
@@ -334,17 +328,15 @@ class SensorStates:
         if calculated_fcc != data[-1]:
             raise ValueError(f"Checksum mismatch: got 0x{data[-1]:02x}, expected 0x{calculated_fcc:02x}")
 
-        outside_temperature = GeneralStates._from_fine_temperature(data[10])
-        room_temperature = GeneralStates._from_fine_temperature(data[12])
-        thermal_sensor = (data[19] & 0x01) != 0
-        wind_speed_pr557 = 1 if (data[20] & 0x01) == 1 else 0
+        obj = cls.__new__(cls)
 
-        return SensorStates(
-            outside_temperature=outside_temperature,
-            room_temperature=room_temperature,
-            thermal_sensor=thermal_sensor,
-            wind_speed_pr557=wind_speed_pr557,
-        )
+        obj.outside_temperature = GeneralStates._from_fine_temperature(data[10])
+        obj.room_temperature = GeneralStates._from_fine_temperature(data[12])
+        obj.thermal_sensor = (data[19] & 0x01) != 0
+        obj.wind_speed_pr557 = 1 if (data[20] & 0x01) == 1 else 0
+
+        return obj
+
 
 @dataclass
 class EnergyStates:
@@ -380,26 +372,79 @@ class EnergyStates:
         if calculated_fcc != data[-1]:
             raise ValueError(f"Checksum mismatch: got 0x{data[-1]:02x}, expected 0x{calculated_fcc:02x}")
 
+        obj = cls.__new__(cls)
+
         # Extract compressor frequency from data[3] (position 18-19 in hex string)
-        compressor_frequency = int(payload[18:20], 16)
+        obj.compressor_frequency = int(payload[18:20], 16)
 
         # Extract operating status from data[4] (position 20-21 in hex string)
-        operating = int(payload[20:22], 16) > 0
+        obj.operating = int(payload[20:22], 16) > 0
 
         # Estimate power consumption if we have context
-        estimated_power = None
+        obj.estimated_power = None
         if general_states:
-            estimated_power = estimate_power_consumption(
-                compressor_frequency,
+            obj.estimated_power = cls.estimate_power_consumption(
+                obj.compressor_frequency,
                 general_states.drive_mode,
                 general_states.wind_speed
             )
 
-        return EnergyStates(
-            compressor_frequency=compressor_frequency,
-            operating=operating,
-            estimated_power_watts=estimated_power,
-        )
+        return obj
+
+    @staticmethod
+    def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_speed: WindSpeed) -> float:
+        """Estimate power consumption based on compressor frequency and operational parameters
+
+        This is a rough estimation based on empirical data from heat pump literature.
+        Actual consumption varies significantly based on outdoor conditions, efficiency rating, etc.
+
+        Args:
+            compressor_frequency: Raw compressor frequency value (0-255 typical)
+            mode: Operating mode (affects base consumption)
+            fan_speed: Fan speed (affects additional consumption)
+
+        Returns:
+            Estimated power consumption in Watts
+        """
+        if compressor_frequency == 0:
+            # Unit is not actively operating - only standby power
+            return 10.0  # Typical standby consumption
+
+        # Base power estimation from compressor frequency
+        # This is a rough linear approximation - real curves are more complex
+        frequency_factor = compressor_frequency / 255.0  # Normalize to 0-1
+
+        # Mode-based base consumption (typical values for residential units)
+        mode_base_watts = {
+            DriveMode.COOLER: 1200,     # Cooling tends to use more power
+            DriveMode.HEATER: 1000,     # Heating can be more efficient
+            DriveMode.AUTO: 1100,       # Average
+            DriveMode.DEHUM: 800,       # Dehumidification uses less
+            DriveMode.FAN: 50,          # Fan only
+            DriveMode.AUTO_COOLER: 1200,
+            DriveMode.AUTO_HEATER: 1000,
+        }
+
+        base_power = mode_base_watts.get(mode, 1000)
+
+        # Compressor power scales roughly with frequency
+        compressor_power = base_power * frequency_factor
+
+        # Fan power addition
+        fan_power_map = {
+            0: 50,      # Variable
+            1: 30,   # Low speed
+            2: 60,   # Medium-low
+            3: 90,   # Medium-high
+            4: 120, # High speed
+        }
+
+        fan_power = fan_power_map.get(fan_speed, 50)
+
+        # Total estimated power
+        total_power = compressor_power + fan_power + 20  # +20W for control electronics
+
+        return round(total_power, 1)
 
 
 @dataclass 
@@ -425,15 +470,14 @@ class ErrorStates:
         if calculated_fcc != data[-1]:
             raise ValueError(f"Checksum mismatch: got 0x{data[-1]:02x}, expected 0x{calculated_fcc:02x}")
 
+        obj = cls.__new__(cls)
+
         code_head = payload[18:20]
         code_tail = payload[20:22]
-        is_abnormal_state = not (code_head == '80' and code_tail == '00')
-        error_code = f"{code_head}{code_tail}"
+        obj.is_abnormal_state = not (code_head == '80' and code_tail == '00')
+        obj.error_code = f"{code_head}{code_tail}"
 
-        return ErrorStates(
-            is_abnormal_state=is_abnormal_state,
-            error_code=error_code,
-        )
+        return obj
 
 
 @dataclass
@@ -447,7 +491,34 @@ class ParsedDeviceState:
     serial: str = ""
     rssi: str = ""
     app_version: str = ""
-    
+
+    @classmethod
+    def parse_code_values(cls, code_values: List[bytes]) -> ParsedDeviceState:
+        """Parse a list of code values and return combined device state with energy information"""
+        parsed_state = ParsedDeviceState()
+
+        for value in code_values:
+            hex_value = value.hex()
+            if not hex_value or len(hex_value) < 20:
+                continue
+
+            hex_lower = hex_value.lower()
+            if not all(c in '0123456789abcdef' for c in hex_lower):
+                continue
+
+            # Parse different payload types
+            if GeneralStates.is_general_states_payload(value):
+                parsed_state.general = GeneralStates.deserialize(value)
+            elif SensorStates.is_sensor_states_payload(value):
+                parsed_state.sensors = SensorStates.deserialize(value)
+            elif ErrorStates.is_error_states_payload(value):
+                parsed_state.errors = ErrorStates.deserialize(value)
+            elif EnergyStates.is_energy_states_payload(value):
+                # Parse energy states with context from general states if available
+                parsed_state.energy = EnergyStates.deserialize(value, parsed_state.general)
+
+        return parsed_state
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         result = {
@@ -505,83 +576,3 @@ class ParsedDeviceState:
 def calc_fcc(payload: bytes) -> int:
     """Calculate FCC checksum for Mitsubishi protocol payload"""
     return 0x100 - (sum(payload[0:20]) % 0x100)  # TODO: do we actually need to limit this to 20 bytes?
-
-def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_speed: WindSpeed) -> float:
-    """Estimate power consumption based on compressor frequency and operational parameters
-    
-    This is a rough estimation based on empirical data from heat pump literature.
-    Actual consumption varies significantly based on outdoor conditions, efficiency rating, etc.
-    
-    Args:
-        compressor_frequency: Raw compressor frequency value (0-255 typical)
-        mode: Operating mode (affects base consumption)
-        fan_speed: Fan speed (affects additional consumption)
-        
-    Returns:
-        Estimated power consumption in Watts
-    """
-    if compressor_frequency == 0:
-        # Unit is not actively operating - only standby power
-        return 10.0  # Typical standby consumption
-    
-    # Base power estimation from compressor frequency
-    # This is a rough linear approximation - real curves are more complex
-    frequency_factor = compressor_frequency / 255.0  # Normalize to 0-1
-    
-    # Mode-based base consumption (typical values for residential units)
-    mode_base_watts = {
-        DriveMode.COOLER: 1200,     # Cooling tends to use more power
-        DriveMode.HEATER: 1000,     # Heating can be more efficient
-        DriveMode.AUTO: 1100,       # Average
-        DriveMode.DEHUM: 800,       # Dehumidification uses less
-        DriveMode.FAN: 50,          # Fan only
-        DriveMode.AUTO_COOLER: 1200,
-        DriveMode.AUTO_HEATER: 1000,
-    }
-    
-    base_power = mode_base_watts.get(mode, 1000)
-    
-    # Compressor power scales roughly with frequency
-    compressor_power = base_power * frequency_factor
-    
-    # Fan power addition
-    fan_power_map = {
-        0: 50,      # Variable
-        1: 30,   # Low speed
-        2: 60,   # Medium-low
-        3: 90,   # Medium-high
-        4: 120, # High speed
-    }
-    
-    fan_power = fan_power_map.get(fan_speed, 50)
-    
-    # Total estimated power
-    total_power = compressor_power + fan_power + 20  # +20W for control electronics
-    
-    return round(total_power, 1)
-
-def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
-    """Parse a list of code values and return combined device state with energy information"""
-    parsed_state = ParsedDeviceState()
-    
-    for value in code_values:
-        hex_value = value.hex()
-        if not hex_value or len(hex_value) < 20:
-            continue
-            
-        hex_lower = hex_value.lower()
-        if not all(c in '0123456789abcdef' for c in hex_lower):
-            continue
-            
-        # Parse different payload types
-        if GeneralStates.is_general_states_payload(value):
-            parsed_state.general = GeneralStates.deserialize(value)
-        elif SensorStates.is_sensor_states_payload(value):
-            parsed_state.sensors = SensorStates.deserialize(value)
-        elif ErrorStates.is_error_states_payload(value):
-            parsed_state.errors = ErrorStates.deserialize(value)
-        elif EnergyStates.is_energy_states_payload(value):
-            # Parse energy states with context from general states if available
-            parsed_state.energy = EnergyStates.deserialize(value, parsed_state.general)
-    
-    return parsed_state

@@ -15,7 +15,7 @@ from datetime import datetime
 import json
 
 from .mitsubishi_api import MitsubishiAPI
-from .mitsubishi_parser import parse_code_values, PowerOnOff
+from .mitsubishi_parser import PowerOnOff, ParsedDeviceState
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +288,7 @@ class CapabilityDetector:
                             continue
                 
                 # Parse the codes to understand current state and capabilities
-                parsed_state = parse_code_values(code_values)
+                parsed_state = ParsedDeviceState.parse_code_values(code_values)
                 if parsed_state:
                     self._analyze_parsed_state(parsed_state)
                     

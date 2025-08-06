@@ -10,7 +10,7 @@ import pytest
 from pymitsubishi import SensorStates
 from pymitsubishi.mitsubishi_parser import (
     calc_fcc,
-    parse_code_values, GeneralStates, ParsedDeviceState,
+    GeneralStates, ParsedDeviceState,
 )
 
 from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
@@ -61,7 +61,7 @@ class TestCodeValueParsing:
     def test_code_values_parsing(self):
         """Test parsing of complete code value arrays."""
         # Test that parse_code_values can handle real code arrays
-        parsed_state = parse_code_values([
+        parsed_state = ParsedDeviceState.parse_code_values([
             bytes.fromhex(code)
             for code in SAMPLE_CODE_VALUES
         ])
