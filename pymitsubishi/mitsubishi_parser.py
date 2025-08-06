@@ -68,7 +68,6 @@ class GeneralStates:
     wind_and_wind_break_direct: int  = 0
     # Enhanced functionality based on SwiCago insights
     i_see_sensor: bool = False  # i-See sensor active flag
-    mode_raw_value: int = 0     # Raw mode value before i-See processing
     wide_vane_adjustment: bool = False  # Wide vane adjustment flag (SwiCago wideVaneAdj)
     temp_mode: bool = False     # Direct temperature mode flag (SwiCago tempMode)
 
@@ -147,8 +146,7 @@ class GeneralStates:
             control_flags2 |= 0x02
 
         # Build payload
-        payload = b'\x41\x01\x30\x10'
-        payload += b'\x01'
+        payload = b'\x41\x01\x30\x10\x01'
         payload += control_flags.to_bytes(1)
         payload += control_flags2.to_bytes(1)
         payload += self.power_on_off.value.to_bytes(1)
@@ -388,7 +386,6 @@ class ParsedDeviceState:
                 'wind_and_wind_break_direct': self.general.wind_and_wind_break_direct,
                 # Enhanced functionality
                 'i_see_sensor_active': self.general.i_see_sensor,
-                'mode_raw_value': self.general.mode_raw_value,
             }
 
         if self.sensors:

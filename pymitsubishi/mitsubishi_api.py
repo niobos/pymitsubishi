@@ -10,12 +10,14 @@ import base64
 import re
 import requests
 import xml.etree.ElementTree as ET
+from typing import Optional, Dict, Any
+import logging
+
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from Crypto.Random import get_random_bytes
 from requests.auth import HTTPBasicAuth
-from typing import Optional, Dict, Any
-import logging
+from requests.adapters import HTTPAdapter, Retry
 
 # Constants from the working implementation
 KEY_SIZE = 16
@@ -44,6 +46,9 @@ class MitsubishiAPI:
         self.admin_username = admin_username
         self.admin_password = admin_password
         self.session = requests.Session()
+
+        retries = Retry(total=2, backoff_factor=1)
+        self.session.mount('http://', HTTPAdapter(max_retries=retries))
 
     def encrypt_payload(self, payload: str, iv: bytes = None) -> str:
         """Encrypt payload using same method as TypeScript implementation"""
@@ -115,7 +120,7 @@ class MitsubishiAPI:
         url = f'http://{self.device_host_port}/smart'
         
         try:
-            response = self.session.post(url, data=request_body, headers=headers, timeout=10)
+            response = self.session.post(url, data=request_body, headers=headers, timeout=2)
             
             if response.status_code == 200:
                 logger.debug("Response Text:")
@@ -160,7 +165,7 @@ class MitsubishiAPI:
             
             logger.debug(f"Fetching unit info from {url}")
             
-            response = self.session.get(url, auth=auth, timeout=10)
+            response = self.session.get(url, auth=auth, timeout=2)
             
             if response.status_code == 200:
                 logger.debug(f"Unit info HTML response received ({len(response.text)} chars)")
