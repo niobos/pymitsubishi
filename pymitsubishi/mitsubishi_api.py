@@ -18,7 +18,7 @@ import logging
 
 # Constants from the working implementation
 KEY_SIZE = 16
-STATIC_KEY = "unregistered"
+STATIC_KEY = b"unregistered\0\0\0\0"
 
 logger = logging.getLogger(__name__)
 
@@ -26,28 +26,31 @@ logger = logging.getLogger(__name__)
 class MitsubishiAPI:
     """Handles all API communication with Mitsubishi AC devices"""
     
-    def __init__(self, device_ip: str, encryption_key: str = STATIC_KEY, admin_username: str = "admin", admin_password: str = "me1debug@0567"):
+    def __init__(
+            self,
+            device_ip: str,
+            encryption_key: bytes = STATIC_KEY,
+            admin_username: str = "admin",
+            admin_password: str = "me1debug@0567"
+    ):
         self.device_ip = device_ip
+
         self.encryption_key = encryption_key
+        if len(self.encryption_key) != KEY_SIZE:
+            self.encryption_key += (KEY_SIZE - len(self.encryption_key)) * b'\0'  # pad with NULL-bytes
+            self.encryption_key = self.encryption_key[0:KEY_SIZE]  # trim when too long
+
         self.admin_username = admin_username
         self.admin_password = admin_password
         self.session = requests.Session()
-        
-    def get_crypto_key(self):
-        """Get the crypto key, same as TypeScript implementation"""
-        buffer = bytearray(KEY_SIZE)
-        key_bytes = self.encryption_key.encode('utf-8')
-        buffer[:len(key_bytes)] = key_bytes
-        return bytes(buffer)
 
-    def encrypt_payload(self, payload: str) -> str:
+    def encrypt_payload(self, payload: str, iv: bytes = None) -> str:
         """Encrypt payload using same method as TypeScript implementation"""
-        # Generate random IV
-        iv = get_random_bytes(KEY_SIZE)
-        key = self.get_crypto_key()
-        
+        if iv is None:  # Allow passing in IV for testing purposes
+            iv = get_random_bytes(KEY_SIZE)
+
         # Encrypt using AES CBC with zero padding
-        cipher = AES.new(key, AES.MODE_CBC, iv)
+        cipher = AES.new(self.encryption_key, AES.MODE_CBC, iv)
         
         # Zero pad the payload to multiple of 16 bytes
         payload_bytes = payload.encode('utf-8')
@@ -80,16 +83,14 @@ class MitsubishiAPI:
             
             logger.debug(f"IV: {iv.hex()}")
             
-            key = self.get_crypto_key()
-            
             # Extract the encrypted portion
             encrypted_hex = hex_buffer[2 * KEY_SIZE:]
             encrypted_data = bytes.fromhex(encrypted_hex)
             
             logger.debug(f"Encrypted data length: {len(encrypted_data)}")
             logger.debug(f"Encrypted data (first 64 bytes): {encrypted_data[:64].hex()}")
-            
-            cipher = AES.new(key, AES.MODE_CBC, iv)
+
+            cipher = AES.new(self.encryption_key, AES.MODE_CBC, iv)
             decrypted = cipher.decrypt(encrypted_data)
             
             logger.debug(f"Decrypted raw length: {len(decrypted)}")
