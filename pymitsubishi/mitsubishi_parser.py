@@ -71,7 +71,6 @@ class GeneralStates:
     mode_raw_value: int = 0     # Raw mode value before i-See processing
     wide_vane_adjustment: bool = False  # Wide vane adjustment flag (SwiCago wideVaneAdj)
     temp_mode: bool = False     # Direct temperature mode flag (SwiCago tempMode)
-    undocumented_flags: Dict[str, Any] = None  # Store unknown bit patterns for analysis
 
     @staticmethod
     def is_general_states_payload(data: bytes) -> bool:
@@ -260,7 +259,7 @@ class SensorStates:
 class EnergyStates:
     """Parsed energy and operational states from device response"""
     compressor_frequency: Optional[int] = None  # Raw compressor frequency value
-    operating: bool = False  # True if heat pump is actively operating
+    operating: int = False  # True if heat pump is actively operating
 
     @staticmethod
     def is_energy_states_payload(payload: bytes) -> bool:
@@ -322,7 +321,7 @@ class ErrorStates:
         obj = cls.__new__(cls)
 
         obj._unknown0 = data[0:9]
-        obj.error_code = int.from_bytes(data[9:10], byteorder="big", signed=False)
+        obj.error_code = int.from_bytes(data[9:11], byteorder="big", signed=False)
         if len(data) > 11:
             obj._unknown11 = data[11:]
 
@@ -391,10 +390,7 @@ class ParsedDeviceState:
                 'i_see_sensor_active': self.general.i_see_sensor,
                 'mode_raw_value': self.general.mode_raw_value,
             }
-            # Include undocumented flags analysis if present
-            if self.general.undocumented_flags:
-                result['general_states']['undocumented_analysis'] = self.general.undocumented_flags
-            
+
         if self.sensors:
             result['sensor_states'] = {
                 'room_temperature_celsius': self.sensors.room_temperature,

@@ -17,7 +17,10 @@ logger = logging.getLogger(__name__)
 
 ctrl = MitsubishiController.create(args.host)
 ctrl.fetch_status()
-pprint(ctrl.get_status_summary())
+pprint(ctrl.state.general)
+pprint(ctrl.state.sensors)
+pprint(ctrl.state.energy)
+pprint(ctrl.state.errors)
 
 changes = False
 if args.mode:
@@ -33,4 +36,7 @@ if args.target_temperature:
 if changes:
     print()
     print("After changes:")
-    pprint(ctrl.get_status_summary())
+    pprint(ctrl.state.general)
+    pprint(ctrl.state.sensors)
+    pprint(ctrl.state.energy)
+    pprint(ctrl.state.errors)

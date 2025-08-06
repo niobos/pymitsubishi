@@ -33,7 +33,7 @@ class MitsubishiController:
         api = MitsubishiAPI(device_host_port=device_host_port, encryption_key=encryption_key)
         return cls(api)
         
-    def fetch_status(self, detect_capabilities: bool = True) -> bool:
+    def fetch_status(self, detect_capabilities: bool = False) -> bool:
         """Fetch current device status and optionally detect capabilities"""
         response = self.api.send_status_request()
         if response:
