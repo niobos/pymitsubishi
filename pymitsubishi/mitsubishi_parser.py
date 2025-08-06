@@ -103,6 +103,11 @@ class GeneralStates:
         logger.debug(f"GeneralState.deserialize: {data.hex()}")
         if len(data) < 21:
             raise ValueError("Data too short")
+
+        calculated_fcc = calc_fcc(data[1:-1])
+        if calculated_fcc != data[-1]:
+            raise ValueError(f"Checksum mismatch: got 0x{data[-1]:02x}, expected 0x{calculated_fcc:02x}")
+
         obj = cls.__new__(cls)
         payload = data.hex()
 
@@ -219,6 +224,7 @@ class GeneralStates:
         if not 16 <= temp <= 31:
             raise ValueError(f"Invalid temperature value {temp}")
         return 31 - int(temp)
+
     @staticmethod
     def _from_fine_temperature(value: int) -> float:
         return (value - 0x80) * 0.5
@@ -251,14 +257,18 @@ class SensorStates:
         return payload[1] in [0x62, 0x7b] and payload[5] == 0x03
 
     @classmethod
-    def deserialize(cls, payload: bytes) -> SensorStates:
-        if len(payload) < 21:
+    def deserialize(cls, data: bytes) -> SensorStates:
+        if len(data) < 21:
             raise ValueError("Payload too short")
 
-        outside_temperature = GeneralStates._from_fine_temperature(payload[10])
-        room_temperature = GeneralStates._from_fine_temperature(payload[12])
-        thermal_sensor = (payload[19] & 0x01) != 0
-        wind_speed_pr557 = 1 if (payload[20] & 0x01) == 1 else 0
+        calculated_fcc = calc_fcc(data[1:-1])
+        if calculated_fcc != data[-1]:
+            raise ValueError(f"Checksum mismatch: got 0x{data[-1]:02x}, expected 0x{calculated_fcc:02x}")
+
+        outside_temperature = GeneralStates._from_fine_temperature(data[10])
+        room_temperature = GeneralStates._from_fine_temperature(data[12])
+        thermal_sensor = (data[19] & 0x01) != 0
+        wind_speed_pr557 = 1 if (data[20] & 0x01) == 1 else 0
 
         return SensorStates(
             outside_temperature=outside_temperature,
@@ -282,7 +292,7 @@ class EnergyStates:
         return payload[1] in [0x62, 0x7b] and payload[5] == 0x06
 
     @classmethod
-    def deserialize(cls, payload_b: bytes, general_states: Optional[GeneralStates] = None) -> EnergyStates:
+    def deserialize(cls, data: bytes, general_states: Optional[GeneralStates] = None) -> EnergyStates:
         """Parse energy/status states from hex payload (SwiCago group 06)
 
         Based on SwiCago implementation:
@@ -290,12 +300,16 @@ class EnergyStates:
         - data[4] = operating status (boolean)
 
         Args:
-            payload_b: payload bytes
+            data: payload bytes
             general_states: Optional general states for power estimation context
         """
-        payload = payload_b.hex()
-        if len(payload_b) < 12:  # Need at least enough bytes for data[4]
+        payload = data.hex()
+        if len(data) < 12:  # Need at least enough bytes for data[4]
             raise ValueError("Payload too short")
+
+        calculated_fcc = calc_fcc(data[1:-1])
+        if calculated_fcc != data[-1]:
+            raise ValueError(f"Checksum mismatch: got 0x{data[-1]:02x}, expected 0x{calculated_fcc:02x}")
 
         # Extract compressor frequency from data[3] (position 18-19 in hex string)
         compressor_frequency = int(payload[18:20], 16)
@@ -333,10 +347,14 @@ class ErrorStates:
         return payload[1] in [0x62, 0x7b] and payload[5] == 0x04
 
     @classmethod
-    def deserialize(cls, payload_b: bytes) -> ErrorStates:
-        payload = payload_b.hex()
+    def deserialize(cls, data: bytes) -> ErrorStates:
+        payload = data.hex()
         if len(payload) < 22:
             raise ValueError("Payload too short")
+
+        calculated_fcc = calc_fcc(data[1:-1])
+        if calculated_fcc != data[-1]:
+            raise ValueError(f"Checksum mismatch: got 0x{data[-1]:02x}, expected 0x{calculated_fcc:02x}")
 
         code_head = payload[18:20]
         code_tail = payload[20:22]
