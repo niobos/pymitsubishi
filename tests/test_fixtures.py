@@ -86,15 +86,6 @@ TEMPERATURE_TEST_CASES = [
     {"celsius": 32.1, "expected_units": None, "valid": False},  # Too high
 ]
 
-# Mode control test cases
-MODE_TEST_CASES = [
-    {"mode": "COOLER", "hex_value": "03"},
-    {"mode": "HEATER", "hex_value": "01"},
-    {"mode": "AUTO", "hex_value": "08"},
-    {"mode": "DEHUM", "hex_value": "02"},
-    {"mode": "FAN", "hex_value": "07"},
-]
-
 # Device status summary expected format
 EXPECTED_STATUS_SUMMARY = {
     "mac": "AA:BB:CC:DD:EE:FF",

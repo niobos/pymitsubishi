@@ -10,6 +10,9 @@ from __future__ import annotations
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
+import logging
+
+logger = logging.getLogger(__name__)
 
 from pymitsubishi import MitsubishiAPI
 
@@ -29,23 +32,23 @@ class PowerOnOff(Enum):
             return PowerOnOff.OFF
 
 class DriveMode(Enum):
-    HEATER = '01'
-    DEHUM = '02' 
-    COOLER = '03'
-    AUTO = '08'
-    AUTO_COOLER = '1b'
-    AUTO_HEATER = '19'
-    FAN = '07'
+    AUTO = 0
+    HEATER = 1
+    DEHUM = 2
+    COOLER = 3
+    AUTO_COOLER = 0x1b
+    AUTO_HEATER = 0x19
+    FAN = 7
 
     @classmethod
-    def from_segment(cls, segment: str) -> DriveMode:
+    def from_segment(cls, segment: int) -> DriveMode:
         mode_map = {
-            '03': DriveMode.COOLER, '0b': DriveMode.COOLER,
-            '01': DriveMode.HEATER, '09': DriveMode.HEATER,
-            '08': DriveMode.AUTO,
-            '00': DriveMode.DEHUM, '02': DriveMode.DEHUM, '0a': DriveMode.DEHUM, '0c': DriveMode.DEHUM,
-            '1b': DriveMode.AUTO_COOLER,
-            '19': DriveMode.AUTO_HEATER,
+            0x03: DriveMode.COOLER, 0x0b: DriveMode.COOLER,
+            0x01: DriveMode.HEATER, 0x09: DriveMode.HEATER,
+            0x08: DriveMode.AUTO,
+            0x00: DriveMode.DEHUM, 0x02: DriveMode.DEHUM, 0x0a: DriveMode.DEHUM, 0x0c: DriveMode.DEHUM,
+            0x1b: DriveMode.AUTO_COOLER,
+            0x19: DriveMode.AUTO_HEATER,
         }
         return mode_map.get(segment, DriveMode.FAN)
 
@@ -152,6 +155,108 @@ class GeneralStates:
     temp_mode: bool = False     # Direct temperature mode flag (SwiCago tempMode)
     undocumented_flags: Dict[str, Any] = None  # Store unknown bit patterns for analysis
 
+    @staticmethod
+    def is_general_states_payload(payload: bytes) -> bool:
+        """Check if payload contains general states data"""
+        if len(payload) < 6:
+            return False
+        return payload[1] in [0x62, 0x7b] and payload[5] == 0x02
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> GeneralStates:
+        logger.debug(f"GeneralState.deserialize: {data.hex()}")
+        if len(data) < 21:
+            raise ValueError("Data too short")
+        payload = data.hex()
+
+        power_on_off = PowerOnOff.from_segment(format(data[8], "02x"))
+
+        # Our payload structure starts with 'fc62013010' (5 bytes) then data begins
+        # So data[0] is at position 10-11, data[1] at 12-13, etc.
+        # data[5] (temp segment) would be at position 20-21
+        # data[11] (direct temp) would be at position 32-33
+
+        if len(payload) > 33:  # Check if we have data[11] position (32-33)
+            temp_direct_raw = data[16]  # data[11] in SwiCago
+            if temp_direct_raw != 0x00:
+                # Direct temperature mode (SwiCago tempMode = true)
+                temp_mode = True
+                temperature = MitsubishiTemperature.from_segment(temp_direct_raw)
+            else:
+                # Segment-based temperature (SwiCago tempMode = false)
+                temp_mode = False
+                if len(payload) > 21:  # Check if we have data[5] position (20-21)
+                    temperature = MitsubishiTemperature.from_segment(data[10])  # data[5] in SwiCago
+        elif len(payload) > 21:  # Fallback to segment-based parsing if we don't have data[11]
+            temperature = MitsubishiTemperature.from_segment(data[10])
+
+        # Enhanced mode parsing with i-See sensor detection
+        mode_byte = data[9] # data[4] in SwiCago
+        drive_mode, i_see_active, raw_mode = GeneralStates.parse_mode_with_i_see(mode_byte)
+
+        wind_speed = WindSpeed.from_segment(payload[22:24])  # data[6] in SwiCago
+        right_vertical_wind_direction = VerticalWindDirection.from_segment(payload[24:26])  # data[7] in SwiCago
+        left_vertical_wind_direction = VerticalWindDirection.from_segment(payload[40:42])
+
+        # Enhanced wide vane parsing with adjustment flag (SwiCago)
+        wide_vane_data = data[15] if len(payload) > 31 else 0  # data[10] in SwiCago
+        horizontal_wind_direction = HorizontalWindDirection.from_segment(f"{wide_vane_data & 0x0F:02x}")  # Lower 4 bits
+        wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
+
+        # Extra states
+        dehum_setting = data[17] if len(payload) > 35 else 0
+        is_power_saving = data[18] > 0 if len(payload) > 37 else False
+        wind_and_wind_break_direct = data[19] if len(payload) > 39 else 0
+
+        # Analyze undocumented bits for research purposes
+        undocumented_analysis = analyze_undocumented_bits(payload)
+
+        return GeneralStates(
+            power_on_off=power_on_off,
+            temperature=temperature,
+            drive_mode=drive_mode,
+            wind_speed=wind_speed,
+            vertical_wind_direction_right=right_vertical_wind_direction,
+            vertical_wind_direction_left=left_vertical_wind_direction,
+            horizontal_wind_direction=horizontal_wind_direction,
+            dehum_setting=dehum_setting,
+            is_power_saving=is_power_saving,
+            wind_and_wind_break_direct=wind_and_wind_break_direct,
+            # Enhanced functionality based on SwiCago
+            i_see_sensor=i_see_active,
+            mode_raw_value=raw_mode,
+            wide_vane_adjustment=wide_vane_adjustment,
+            temp_mode=temp_mode,
+            undocumented_flags=undocumented_analysis if undocumented_analysis.get('suspicious_patterns') or undocumented_analysis.get('unknown_segments') else None,
+        )
+
+    @staticmethod
+    def parse_mode_with_i_see(mode_byte: int) -> tuple[DriveMode, bool, int]:
+        """Parse drive mode considering i-See sensor flag (SwiCago enhancement)
+
+        Based on SwiCago implementation: i-See sensor is detected when mode > 0x08.
+        The actual mode is extracted by subtracting 0x08 from the raw mode value.
+
+        Args:
+            mode_byte: Raw mode byte value from payload
+
+        Returns:
+            tuple of (drive_mode, i_see_active, raw_mode_value)
+        """
+        # Check if i-See sensor flag is set (mode > 0x08 as per SwiCago)
+        i_see_active = mode_byte > 0x08
+
+        # Extract actual mode by removing i-See flag if present
+        # This matches SwiCago's logic: receivedSettings.iSee ? (data[4] - 0x08) : data[4]
+        actual_mode_value = mode_byte - 0x08 if i_see_active else mode_byte
+
+        # Map the mode value to DriveMode enum
+        drive_mode = DriveMode.from_segment(actual_mode_value)
+
+        return drive_mode, i_see_active, mode_byte
+
+
+
 @dataclass
 class SensorStates:
     """Parsed sensor states from device response"""
@@ -160,6 +265,30 @@ class SensorStates:
     thermal_sensor: bool
     wind_speed_pr557: int
 
+    @staticmethod
+    def is_sensor_states_payload(payload: bytes) -> bool:
+        """Check if payload contains sensor states data"""
+        if len(payload) < 6:
+            return False
+        return payload[1] in [0x62, 0x7b] and payload[5] == 0x03
+
+    @classmethod
+    def deserialize(cls, payload: bytes) -> SensorStates:
+        if len(payload) < 21:
+            raise ValueError("Payload too short")
+
+        outside_temperature = MitsubishiTemperature.from_segment(payload[10])
+        room_temperature = MitsubishiTemperature.from_segment(payload[12])
+        thermal_sensor = (payload[19] & 0x01) != 0
+        wind_speed_pr557 = 1 if (payload[20] & 0x01) == 1 else 0
+
+        return SensorStates(
+            outside_temperature=outside_temperature,
+            room_temperature=room_temperature,
+            thermal_sensor=thermal_sensor,
+            wind_speed_pr557=wind_speed_pr557,
+        )
+
 @dataclass
 class EnergyStates:
     """Parsed energy and operational states from device response"""
@@ -167,11 +296,80 @@ class EnergyStates:
     operating: bool = False  # True if heat pump is actively operating
     estimated_power_watts: Optional[float] = None  # Estimated power consumption in Watts
 
+    @staticmethod
+    def is_energy_states_payload(payload: bytes) -> bool:
+        """Check if payload contains energy/status data (SwiCago group 06)"""
+        if len(payload) < 6:
+            return False
+        return payload[1] in [0x62, 0x7b] and payload[5] == 0x06
+
+    @classmethod
+    def deserialize(cls, payload_b: bytes, general_states: Optional[GeneralStates] = None) -> EnergyStates:
+        """Parse energy/status states from hex payload (SwiCago group 06)
+
+        Based on SwiCago implementation:
+        - data[3] = compressor frequency
+        - data[4] = operating status (boolean)
+
+        Args:
+            payload_b: payload bytes
+            general_states: Optional general states for power estimation context
+        """
+        payload = payload_b.hex()
+        if len(payload_b) < 12:  # Need at least enough bytes for data[4]
+            raise ValueError("Payload too short")
+
+        # Extract compressor frequency from data[3] (position 18-19 in hex string)
+        compressor_frequency = int(payload[18:20], 16)
+
+        # Extract operating status from data[4] (position 20-21 in hex string)
+        operating = int(payload[20:22], 16) > 0
+
+        # Estimate power consumption if we have context
+        estimated_power = None
+        if general_states:
+            estimated_power = estimate_power_consumption(
+                compressor_frequency,
+                general_states.drive_mode,
+                general_states.wind_speed
+            )
+
+        return EnergyStates(
+            compressor_frequency=compressor_frequency,
+            operating=operating,
+            estimated_power_watts=estimated_power,
+        )
+
+
 @dataclass 
 class ErrorStates:
     """Parsed error states from device response"""
     is_abnormal_state: bool = False
     error_code: str = "8000"
+
+    @staticmethod
+    def is_error_states_payload(payload: bytes) -> bool:
+        """Check if payload contains error states data"""
+        if len(payload) < 6:
+            return False
+        return payload[1] in [0x62, 0x7b] and payload[5] == 0x04
+
+    @classmethod
+    def deserialize(cls, payload_b: bytes) -> ErrorStates:
+        payload = payload_b.hex()
+        if len(payload) < 22:
+            raise ValueError("Payload too short")
+
+        code_head = payload[18:20]
+        code_tail = payload[20:22]
+        is_abnormal_state = not (code_head == '80' and code_tail == '00')
+        error_code = f"{code_head}{code_tail}"
+
+        return ErrorStates(
+            is_abnormal_state=is_abnormal_state,
+            error_code=error_code,
+        )
+
 
 @dataclass
 class ParsedDeviceState:
@@ -243,31 +441,6 @@ def calc_fcc(payload: bytes) -> int:
     """Calculate FCC checksum for Mitsubishi protocol payload"""
     return 0x100 - (sum(payload[0:20]) % 0x100)  # TODO: do we actually need to limit this to 20 bytes?
 
-def parse_mode_with_i_see(mode_byte: int) -> tuple[DriveMode, bool, int]:
-    """Parse drive mode considering i-See sensor flag (SwiCago enhancement)
-    
-    Based on SwiCago implementation: i-See sensor is detected when mode > 0x08.
-    The actual mode is extracted by subtracting 0x08 from the raw mode value.
-    
-    Args:
-        mode_byte: Raw mode byte value from payload
-        
-    Returns:
-        tuple of (drive_mode, i_see_active, raw_mode_value)
-    """
-    # Check if i-See sensor flag is set (mode > 0x08 as per SwiCago)
-    i_see_active = mode_byte > 0x08
-    
-    # Extract actual mode by removing i-See flag if present
-    # This matches SwiCago's logic: receivedSettings.iSee ? (data[4] - 0x08) : data[4]
-    actual_mode_value = mode_byte - 0x08 if i_see_active else mode_byte
-    
-    # Map the mode value to DriveMode enum
-    mode_hex = f"{actual_mode_value:02x}"
-    drive_mode = DriveMode.from_segment(mode_hex)
-    
-    return drive_mode, i_see_active, mode_byte
-
 def analyze_undocumented_bits(payload: str) -> Dict[str, Any]:
     """Analyze payload for undocumented bit patterns and flags
     
@@ -326,30 +499,6 @@ def analyze_undocumented_bits(payload: str) -> Dict[str, Any]:
     
     return analysis
 
-def is_general_states_payload(payload: bytes) -> bool:
-    """Check if payload contains general states data"""
-    if len(payload) < 6:
-        return False
-    return payload[1] in [0x62, 0x7b] and payload[5] == 0x02
-
-def is_sensor_states_payload(payload: bytes) -> bool:
-    """Check if payload contains sensor states data"""
-    if len(payload) < 6:
-        return False
-    return payload[1] in [0x62, 0x7b] and payload[5] == 0x03
-
-def is_error_states_payload(payload: bytes) -> bool:
-    """Check if payload contains error states data"""
-    if len(payload) < 6:
-        return False
-    return payload[1] in [0x62, 0x7b] and payload[5] == 0x04
-
-def is_energy_states_payload(payload: bytes) -> bool:
-    """Check if payload contains energy/status data (SwiCago group 06)"""
-    if len(payload) < 6:
-        return False
-    return payload[1] in [0x62, 0x7b] and payload[5] == 0x06
-
 def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_speed: WindSpeed) -> float:
     """Estimate power consumption based on compressor frequency and operational parameters
     
@@ -404,164 +553,6 @@ def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_s
     
     return round(total_power, 1)
 
-def parse_energy_states(payload_b: bytes, general_states: Optional[GeneralStates] = None) -> Optional[EnergyStates]:
-    """Parse energy/status states from hex payload (SwiCago group 06)
-    
-    Based on SwiCago implementation:
-    - data[3] = compressor frequency
-    - data[4] = operating status (boolean)
-    
-    Args:
-        payload_b: payload bytes
-        general_states: Optional general states for power estimation context
-    """
-    payload = payload_b.hex()
-    if len(payload) < 24:  # Need at least enough bytes for data[4]
-        return None
-    
-    try:
-        # Extract compressor frequency from data[3] (position 18-19 in hex string)
-        compressor_frequency = int(payload[18:20], 16)
-        
-        # Extract operating status from data[4] (position 20-21 in hex string) 
-        operating = int(payload[20:22], 16) > 0
-        
-        # Estimate power consumption if we have context
-        estimated_power = None
-        if general_states:
-            estimated_power = estimate_power_consumption(
-                compressor_frequency,
-                general_states.drive_mode,
-                general_states.wind_speed
-            )
-        
-        return EnergyStates(
-            compressor_frequency=compressor_frequency,
-            operating=operating,
-            estimated_power_watts=estimated_power,
-        )
-    except (ValueError, IndexError):
-        return None
-
-def parse_general_states(payload_b: bytes) -> Optional[GeneralStates]:
-    """Parse general states from hex payload with enhanced SwiCago-based parsing
-    
-    Enhanced with SwiCago insights:
-    - Dual temperature parsing modes (segment vs direct)
-    - Wide vane adjustment flag detection
-    - i-See sensor detection from mode byte
-    """
-    payload = payload_b.hex()
-    if len(payload) < 42:
-        return None
-    
-    try:
-        power_on_off = PowerOnOff.from_segment(payload[16:18])
-        
-        # Enhanced temperature parsing (SwiCago logic)
-        # Check for direct temperature mode first (data[11] != 0x00)
-        temp_mode = False
-        temperature = 220  # Default to 22.0°C
-        
-        # Our payload structure starts with 'fc62013010' (5 bytes) then data begins
-        # So data[0] is at position 10-11, data[1] at 12-13, etc.
-        # data[5] (temp segment) would be at position 20-21
-        # data[11] (direct temp) would be at position 32-33
-        
-        if len(payload) > 33:  # Check if we have data[11] position (32-33)
-            temp_direct_raw = payload_b[16]  # data[11] in SwiCago
-            if temp_direct_raw != 0x00:
-                # Direct temperature mode (SwiCago tempMode = true)
-                temp_mode = True
-                temperature = MitsubishiTemperature.from_segment(temp_direct_raw)
-            else:
-                # Segment-based temperature (SwiCago tempMode = false)
-                temp_mode = False
-                if len(payload) > 21:  # Check if we have data[5] position (20-21)
-                    temperature = MitsubishiTemperature.from_segment(payload_b[10])  # data[5] in SwiCago
-        elif len(payload) > 21:  # Fallback to segment-based parsing if we don't have data[11]
-            temperature = MitsubishiTemperature.from_segment(payload_b[10])
-        
-        # Enhanced mode parsing with i-See sensor detection
-        mode_byte = payload_b[9]  # data[4] in SwiCago
-        drive_mode, i_see_active, raw_mode = parse_mode_with_i_see(mode_byte)
-        
-        wind_speed = WindSpeed.from_segment(payload[22:24])  # data[6] in SwiCago
-        right_vertical_wind_direction = VerticalWindDirection.from_segment(payload[24:26])  # data[7] in SwiCago
-        left_vertical_wind_direction = VerticalWindDirection.from_segment(payload[40:42])
-        
-        # Enhanced wide vane parsing with adjustment flag (SwiCago)
-        wide_vane_data = payload_b[15] if len(payload) > 31 else 0  # data[10] in SwiCago
-        horizontal_wind_direction = HorizontalWindDirection.from_segment(f"{wide_vane_data & 0x0F:02x}")  # Lower 4 bits
-        wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
-        
-        # Extra states
-        dehum_setting = payload_b[17] if len(payload) > 35 else 0
-        is_power_saving = payload_b[18] > 0 if len(payload) > 37 else False
-        wind_and_wind_break_direct = payload_b[19] if len(payload) > 39 else 0
-        
-        # Analyze undocumented bits for research purposes
-        undocumented_analysis = analyze_undocumented_bits(payload)
-        
-        return GeneralStates(
-            power_on_off=power_on_off,
-            temperature=temperature,
-            drive_mode=drive_mode,
-            wind_speed=wind_speed,
-            vertical_wind_direction_right=right_vertical_wind_direction,
-            vertical_wind_direction_left=left_vertical_wind_direction,
-            horizontal_wind_direction=horizontal_wind_direction,
-            dehum_setting=dehum_setting,
-            is_power_saving=is_power_saving,
-            wind_and_wind_break_direct=wind_and_wind_break_direct,
-            # Enhanced functionality based on SwiCago
-            i_see_sensor=i_see_active,
-            mode_raw_value=raw_mode,
-            wide_vane_adjustment=wide_vane_adjustment,
-            temp_mode=temp_mode,
-            undocumented_flags=undocumented_analysis if undocumented_analysis.get('suspicious_patterns') or undocumented_analysis.get('unknown_segments') else None,
-        )
-    except (ValueError, IndexError):
-        return None
-
-def parse_sensor_states(payload: bytes) -> Optional[SensorStates]:
-    if len(payload) < 21:
-        return None
-    
-    try:
-        outside_temperature = MitsubishiTemperature.from_segment(payload[10])
-        room_temperature = MitsubishiTemperature.from_segment(payload[12])
-        thermal_sensor = (payload[19] & 0x01) != 0
-        wind_speed_pr557 = 1 if (payload[20] & 0x01) == 1 else 0
-        
-        return SensorStates(
-            outside_temperature=outside_temperature,
-            room_temperature=room_temperature,
-            thermal_sensor=thermal_sensor,
-            wind_speed_pr557=wind_speed_pr557,
-        )
-    except (ValueError, IndexError):
-        return None
-
-def parse_error_states(payload_b: bytes) -> Optional[ErrorStates]:
-    """Parse error states from hex payload"""
-    payload = payload_b.hex()
-    if len(payload) < 22:
-        return None
-    
-    try:
-        code_head = payload[18:20]
-        code_tail = payload[20:22]
-        is_abnormal_state = not (code_head == '80' and code_tail == '00')
-        error_code = f"{code_head}{code_tail}"
-        
-        return ErrorStates(
-            is_abnormal_state=is_abnormal_state,
-            error_code=error_code,
-        )
-    except (ValueError, IndexError):
-        return None
-
 def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
     """Parse a list of code values and return combined device state with energy information"""
     parsed_state = ParsedDeviceState()
@@ -576,15 +567,15 @@ def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
             continue
             
         # Parse different payload types
-        if is_general_states_payload(value):
-            parsed_state.general = parse_general_states(value)
-        elif is_sensor_states_payload(value):
-            parsed_state.sensors = parse_sensor_states(value)
-        elif is_error_states_payload(value):
-            parsed_state.errors = parse_error_states(value)
-        elif is_energy_states_payload(value):
+        if GeneralStates.is_general_states_payload(value):
+            parsed_state.general = GeneralStates.deserialize(value)
+        elif SensorStates.is_sensor_states_payload(value):
+            parsed_state.sensors = SensorStates.deserialize(value)
+        elif ErrorStates.is_error_states_payload(value):
+            parsed_state.errors = ErrorStates.deserialize(value)
+        elif EnergyStates.is_energy_states_payload(value):
             # Parse energy states with context from general states if available
-            parsed_state.energy = parse_energy_states(value, parsed_state.general)
+            parsed_state.energy = EnergyStates.deserialize(value, parsed_state.general)
     
     return parsed_state
 
@@ -627,7 +618,7 @@ def generate_general_command(general_states: GeneralStates, controls: Dict[str, 
     segments['segment1'] = f"{segment1_value:02x}"
     segments['segment2'] = f"{segment2_value:02x}"
     segments['segment3'] = general_states.power_on_off.value
-    segments['segment4'] = general_states.drive_mode.value
+    segments['segment4'] = format(general_states.drive_mode.value, "02x")
     segments['segment6'] = f"{general_states.wind_speed.value:02x}"
     segments['segment7'] = f"{general_states.vertical_wind_direction_right.value:02x}"
     segments['segment13'] = f"{general_states.horizontal_wind_direction.value:02x}"

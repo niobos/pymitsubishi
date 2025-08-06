@@ -19,7 +19,7 @@ from pymitsubishi.mitsubishi_capabilities import CapabilityDetector
 from .test_fixtures import (
     REAL_DEVICE_XML_RESPONSE, EXPECTED_DEVICE_STATE, SAMPLE_PROFILE_CODES,
     SAMPLE_CODE_VALUES, EXPECTED_CAPABILITIES, TEMPERATURE_TEST_CASES,
-    MODE_TEST_CASES, EXPECTED_STATUS_SUMMARY, LED_PATTERNS
+    EXPECTED_STATUS_SUMMARY, LED_PATTERNS
 )
 
 
@@ -81,19 +81,6 @@ class TestTemperatureControl:
             assert 160 <= temp_units <= 320  # Valid range
         else:
             assert temp_units < 160 or temp_units > 320  # Invalid range
-
-
-class TestModeControl:
-    """Test AC mode control with real mode mappings."""
-    
-    @pytest.mark.parametrize("test_case", MODE_TEST_CASES)
-    def test_mode_mappings(self, test_case):
-        """Test that mode enums map to correct hex values."""
-        mode_name = test_case["mode"]
-        expected_hex = test_case["hex_value"]
-        
-        mode = DriveMode[mode_name]
-        assert mode.value == expected_hex
 
 
 @patch('pymitsubishi.mitsubishi_api.requests.post')

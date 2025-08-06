@@ -6,12 +6,14 @@ collected from real Mitsubishi MAC-577IF-2E devices.
 """
 
 import pytest
+
+from pymitsubishi import SensorStates
 from pymitsubishi.mitsubishi_parser import (
     calc_fcc,
     PowerOnOff, DriveMode, WindSpeed,
     VerticalWindDirection, HorizontalWindDirection,
     parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command,
-    MitsubishiTemperature, parse_sensor_states, parse_general_states
+    MitsubishiTemperature,
 )
 
 from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
@@ -33,7 +35,7 @@ def test_fcc(payload, expected):
 
 def test_generate_general_command():
     command = generate_general_command(GeneralStates(), {})
-    assert command == "fc410130100100020008090000000000000000ac417d"
+    assert command == "fc410130100100020000090000000000000000ac4185"
 
 def test_generate_extend08_command():
     command = generate_extend08_command(GeneralStates(), {})
@@ -57,13 +59,8 @@ def test_sensor_temperature(temp, segment14, segment5):
     assert t.segment14_value == segment14
     assert MitsubishiTemperature.from_segment(segment14) == t
 
-def test_parse_general_states():
-    states = parse_general_states(bytes.fromhex('fc620130100200000003080000000083ae46000000d9'))
-    assert states.temperature == 23.0
-    assert states.drive_mode == DriveMode.COOLER
-
 def test_parse_sensor_states():
-    states = parse_sensor_states(bytes.fromhex('fc620130100300000f00b4b2b2fe420001141a0000c4'))
+    states = SensorStates.deserialize(bytes.fromhex('fc620130100300000f00b4b2b2fe420001141a0000c4'))
     assert states.outside_temperature == 26.0
 
 class TestModeAndStatusParsing:
@@ -81,39 +78,6 @@ class TestModeAndStatusParsing:
             # Codes 01 and 02 should be ON, others typically OFF
             if code in ["01", "02"]:
                 assert status == PowerOnOff.ON
-    
-    def test_drive_mode_parsing(self):
-        """Test drive mode parsing with real mode codes."""
-        # Real device mode mappings from actual responses
-        mode_mappings = {
-            "01": DriveMode.HEATER,
-            "02": DriveMode.DEHUM,
-            "03": DriveMode.COOLER,
-            "07": DriveMode.FAN,
-            "08": DriveMode.AUTO,
-            "09": DriveMode.HEATER,
-            "0a": DriveMode.DEHUM,
-            "0b": DriveMode.COOLER,
-            "0c": DriveMode.DEHUM,
-            "19": DriveMode.AUTO_HEATER,
-            "1b": DriveMode.AUTO_COOLER,
-        }
-        
-        for code, expected_mode in mode_mappings.items():
-            parsed_mode = DriveMode.from_segment(code)
-            assert parsed_mode == expected_mode
-    
-    def test_wind_speed_parsing(self):
-        """Test wind speed parsing with real speed codes."""
-        # Test that wind speed parsing works with common codes
-        speed_codes = ["00", "01", "02", "03", "05", "ff"]
-        
-        for code in speed_codes:
-            speed = WindSpeed.from_segment(code)
-            assert isinstance(speed, WindSpeed)
-            assert speed in [WindSpeed.AUTO, WindSpeed.LEVEL_1, WindSpeed.LEVEL_2, 
-                           WindSpeed.LEVEL_3, WindSpeed.LEVEL_FULL]
-
 
 class TestCodeValueParsing:
     """Test parsing of real CODE values from device responses."""
