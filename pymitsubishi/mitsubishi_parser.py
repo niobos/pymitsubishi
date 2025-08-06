@@ -11,6 +11,8 @@ from enum import Enum
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 
+from pymitsubishi import MitsubishiAPI
+
 # Temperature constants
 MIN_TEMPERATURE = 160  # 16.0°C in 0.1°C units
 MAX_TEMPERATURE = 310  # 31.0°C in 0.1°C units
@@ -126,16 +128,6 @@ def convert_temperature_to_segment(temperature: int) -> str:
     """Convert temperature to segment 14 format"""
     value = 0x80 + (temperature // 5)
     return format(value, '02x')
-
-def get_normalized_temperature(hex_value: int) -> int:
-    """Normalize temperature from hex value to 0.1°C units"""
-    adjusted = 5 * (hex_value - 0x80)
-    if adjusted >= 400:
-        return 400
-    elif adjusted <= 0:
-        return 0
-    else:
-        return adjusted
 
 @dataclass
 class GeneralStates:
@@ -477,15 +469,14 @@ def parse_general_states(payload_b: bytes) -> Optional[GeneralStates]:
             if temp_direct_raw != 0x00:
                 # Direct temperature mode (SwiCago tempMode = true)
                 temp_mode = True
-                temp_celsius = (temp_direct_raw - 128) / 2.0
-                temperature = int(temp_celsius * 10)  # Convert to 0.1°C units
+                temperature = MitsubishiSensorTemperature.from_segment(temp_direct_raw)
             else:
                 # Segment-based temperature (SwiCago tempMode = false)
                 temp_mode = False
                 if len(payload) > 21:  # Check if we have data[5] position (20-21)
-                    temperature = get_normalized_temperature(payload_b[10])  # data[5] in SwiCago
+                    temperature = MitsubishiSensorTemperature.from_segment(payload_b[10])  # data[5] in SwiCago
         elif len(payload) > 21:  # Fallback to segment-based parsing if we don't have data[11]
-            temperature = get_normalized_temperature(payload_b[10])
+            temperature = MitsubishiSensorTemperature.from_segment(payload_b[10])
         
         # Enhanced mode parsing with i-See sensor detection
         mode_byte = payload_b[9]  # data[4] in SwiCago

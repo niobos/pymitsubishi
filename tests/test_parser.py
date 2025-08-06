@@ -8,7 +8,6 @@ collected from real Mitsubishi MAC-577IF-2E devices.
 import pytest
 from pymitsubishi.mitsubishi_parser import (
     calc_fcc, convert_temperature, convert_temperature_to_segment,
-    get_normalized_temperature,
     PowerOnOff, DriveMode, WindSpeed,
     VerticalWindDirection, HorizontalWindDirection,
     parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command,
@@ -40,7 +39,7 @@ def test_generate_extend08_command():
     command = generate_extend08_command(GeneralStates(), {})
     assert command == "fc410130100800000000000000000000000000000076"
 
-def test_outside_temperature():
+def test_sensor_temperature():
     t = MitsubishiSensorTemperature.from_segment(182)
     assert t == 27.0
 
@@ -68,13 +67,7 @@ class TestTemperatureConversion:
             # Test segment format conversion  
             segment14 = convert_temperature_to_segment(temp_units)
             assert len(segment14) == 2
-            
-            # Test reverse conversion
-            hex_val = int(segment14, 16)
-            if hex_val >= 0x80:  # Valid range
-                normalized = get_normalized_temperature(hex_val)
-                assert 0 <= normalized <= 400  # Valid normalized range
-    
+
     def test_temperature_edge_cases(self):
         """Test temperature conversion edge cases."""
         # Test minimum temperature (16°C = 160 units)
@@ -82,10 +75,6 @@ class TestTemperatureConversion:
         
         # Test maximum temperature (32°C = 320 units)  
         assert convert_temperature(320) is not None
-        
-        # Test invalid temperatures
-        assert get_normalized_temperature(0x7F) == 0  # Below minimum
-        assert get_normalized_temperature(0xFF) == 400  # Above maximum
 
 
 class TestModeAndStatusParsing:
