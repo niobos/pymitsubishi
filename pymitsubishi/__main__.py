@@ -1,5 +1,6 @@
 import argparse
 import logging
+from pprint import pprint
 
 from pymitsubishi import MitsubishiController
 
@@ -14,4 +15,4 @@ logger = logging.getLogger(__name__)
 
 ctrl = MitsubishiController.create(args.host)
 ctrl.fetch_status()
-print(ctrl.get_status_summary())
+pprint(ctrl.get_status_summary())

@@ -108,12 +108,12 @@ class HorizontalWindDirection(Enum):
         except ValueError:
             return HorizontalWindDirection.AUTO
 
-class MitsubishiOutsideTemperature(float):
+class MitsubishiSensorTemperature(float):
     @classmethod
-    def from_segment(cls, segment: int) -> MitsubishiOutsideTemperature:
+    def from_segment(cls, segment: int) -> MitsubishiSensorTemperature:
         t = (segment - 0x80) * 0.5
         # TODO: should we cap to 0<=t<=40.0 ?
-        return MitsubishiOutsideTemperature(t)
+        return MitsubishiSensorTemperature(t)
 
 def convert_temperature(temperature: int) -> str:
     """Convert temperature in 0.1°C units to segment format"""
@@ -160,10 +160,10 @@ class GeneralStates:
 @dataclass
 class SensorStates:
     """Parsed sensor states from device response"""
-    outside_temperature: float | None = None
-    room_temperature: int = 220  # 22.0°C in 0.1°C units
-    thermal_sensor: bool = False
-    wind_speed_pr557: int = 0
+    outside_temperature: float | None
+    room_temperature: float
+    thermal_sensor: bool
+    wind_speed_pr557: int
 
 @dataclass
 class EnergyStates:
@@ -223,7 +223,7 @@ class ParsedDeviceState:
             
         if self.sensors:
             result['sensor_states'] = {
-                'room_temperature_celsius': self.sensors.room_temperature / 10.0,
+                'room_temperature_celsius': self.sensors.room_temperature,
                 'outside_temperature_celsius': self.sensors.outside_temperature,
                 'thermal_sensor_active': self.sensors.thermal_sensor,
                 'wind_speed_pr557': self.sensors.wind_speed_pr557,
@@ -533,9 +533,8 @@ def parse_sensor_states(payload: bytes) -> Optional[SensorStates]:
         return None
     
     try:
-        outside_temp_raw = payload[10]
-        outside_temperature = MitsubishiOutsideTemperature.from_segment(payload[10])
-        room_temperature = get_normalized_temperature(payload[12])
+        outside_temperature = MitsubishiSensorTemperature.from_segment(payload[10])
+        room_temperature = MitsubishiSensorTemperature.from_segment(payload[12])
         thermal_sensor = (payload[19] & 0x01) != 0
         wind_speed_pr557 = 1 if (payload[20] & 0x01) == 1 else 0
         
