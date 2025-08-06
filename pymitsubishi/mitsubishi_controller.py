@@ -55,7 +55,7 @@ class MitsubishiController:
             
             # Extract code values for parsing
             code_values_elems = root.findall('.//CODE/VALUE')
-            code_values = [elem.text for elem in code_values_elems if elem.text]
+            code_values = [bytes.fromhex(elem.text) for elem in code_values_elems if elem.text]
             
             # Use the parser module to get structured state
             parsed_state = parse_code_values(code_values)

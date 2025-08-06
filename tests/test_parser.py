@@ -142,7 +142,10 @@ class TestCodeValueParsing:
     def test_code_values_parsing(self):
         """Test parsing of complete code value arrays."""
         # Test that parse_code_values can handle real code arrays
-        parsed_state = parse_code_values(SAMPLE_CODE_VALUES)
+        parsed_state = parse_code_values([
+            bytes.fromhex(code)
+            for code in SAMPLE_CODE_VALUES
+        ])
         
         # Should return a ParsedDeviceState or None
         assert parsed_state is None or isinstance(parsed_state, ParsedDeviceState)

@@ -560,11 +560,12 @@ def parse_error_states(payload: str) -> Optional[ErrorStates]:
     except (ValueError, IndexError):
         return None
 
-def parse_code_values(code_values: List[str]) -> ParsedDeviceState:
+def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
     """Parse a list of code values and return combined device state with energy information"""
     parsed_state = ParsedDeviceState()
     
-    for hex_value in code_values:
+    for value in code_values:
+        hex_value = value.hex()
         if not hex_value or len(hex_value) < 20:
             continue
             
