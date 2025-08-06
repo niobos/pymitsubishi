@@ -298,7 +298,6 @@ class EnergyStates:
             data: payload bytes
             general_states: Optional general states for power estimation context
         """
-        payload = data.hex()
         if len(data) < 12:  # Need at least enough bytes for data[4]
             raise ValueError("Payload too short")
 
@@ -319,8 +318,7 @@ class EnergyStates:
 @dataclass 
 class ErrorStates:
     """Parsed error states from device response"""
-    is_abnormal_state: bool = False
-    error_code: str = "8000"
+    error_code: int = 0x8000
 
     @staticmethod
     def is_error_states_payload(payload: bytes) -> bool:
@@ -331,8 +329,7 @@ class ErrorStates:
 
     @classmethod
     def deserialize(cls, data: bytes) -> ErrorStates:
-        payload = data.hex()
-        if len(payload) < 22:
+        if len(data) < 11:
             raise ValueError("Payload too short")
 
         calculated_fcc = calc_fcc(data[1:-1])
@@ -341,12 +338,16 @@ class ErrorStates:
 
         obj = cls.__new__(cls)
 
-        code_head = payload[18:20]
-        code_tail = payload[20:22]
-        obj.is_abnormal_state = not (code_head == '80' and code_tail == '00')
-        obj.error_code = f"{code_head}{code_tail}"
+        obj._unknown0 = data[0:9]
+        obj.error_code = int.from_bytes(data[9:10], byteorder="big", signed=False)
+        if len(data) > 11:
+            obj._unknown11 = data[11:]
 
         return obj
+
+    @property
+    def is_abnormal_state(self):
+        return self.error_code != 0x8000
 
 
 @dataclass
