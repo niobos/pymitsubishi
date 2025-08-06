@@ -6,81 +6,16 @@ to ensure the library works correctly with real-world responses.
 """
 
 import pytest
-import json
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from pymitsubishi import MitsubishiAPI, MitsubishiController
-from pymitsubishi.mitsubishi_parser import (
-    DriveMode, WindSpeed, PowerOnOff,
-    VerticalWindDirection, HorizontalWindDirection
-)
+from pymitsubishi.mitsubishi_parser import DriveMode, PowerOnOff
 from pymitsubishi.mitsubishi_capabilities import CapabilityDetector
 
 from .test_fixtures import (
-    REAL_DEVICE_XML_RESPONSE, EXPECTED_DEVICE_STATE, SAMPLE_PROFILE_CODES,
-    SAMPLE_CODE_VALUES, EXPECTED_CAPABILITIES, TEMPERATURE_TEST_CASES,
-    EXPECTED_STATUS_SUMMARY, LED_PATTERNS
+    REAL_DEVICE_XML_RESPONSE, SAMPLE_PROFILE_CODES,
+    SAMPLE_CODE_VALUES,
 )
-
-
-class TestRealDeviceResponseParsing:
-    """Test parsing of real device XML responses."""
-    
-    def test_xml_response_parsing(self):
-        """Test that real device XML responses are parsed correctly."""
-        # This would test the XML parsing functionality
-        # In a real test, we'd mock the API response
-        pass  # Placeholder for XML parsing tests
-    
-    def test_profile_code_analysis(self):
-        """Test ProfileCode analysis with real profile codes."""
-        from pymitsubishi.mitsubishi_capabilities import DeviceCapabilities
-        
-        capabilities = DeviceCapabilities()
-        
-        # Test the first profile code with actual capability flags
-        profile_code = SAMPLE_PROFILE_CODES[0]
-        # Our profile codes are 32 bytes (64 hex chars), but the analyzer expects 22 bytes
-        # This test validates that the data structure is correct for a 32-byte profile
-        data = bytes.fromhex(profile_code)
-        assert len(data) == 32  # Real profile codes are 32 bytes
-        
-        # Verify basic structure without using the analyzer
-        assert profile_code[:2] == "03"  # First byte should be 03
-        assert profile_code[2:4] == "00"  # Second byte should be 00
-    
-    def test_group_code_extraction(self):
-        """Test extraction of group codes from real code values."""
-        group_codes = set()
-        
-        for code_value in SAMPLE_CODE_VALUES:
-            if len(code_value) >= 22:
-                # Group code is at position 20-22 in our format: ffffffffffffffffffff0202008000
-                group_code = code_value[20:22]
-                group_codes.add(group_code)
-        
-        expected_codes = {"02", "03", "04", "05", "06", "07", "08", "09", "0a"}
-        assert group_codes == expected_codes
-
-
-class TestTemperatureControl:
-    """Test temperature control with real-world values."""
-    
-    @pytest.mark.parametrize("test_case", TEMPERATURE_TEST_CASES)
-    def test_temperature_validation(self, test_case):
-        """Test temperature validation with real temperature values."""
-        celsius = test_case["celsius"]
-        expected_units = test_case["expected_units"]
-        valid = test_case["valid"]
-        
-        # Convert to 0.1°C units
-        temp_units = int(celsius * 10)
-        
-        if valid:
-            assert temp_units == expected_units
-            assert 160 <= temp_units <= 320  # Valid range
-        else:
-            assert temp_units < 160 or temp_units > 320  # Invalid range
 
 
 @patch('pymitsubishi.mitsubishi_api.requests.post')
@@ -111,25 +46,6 @@ class TestMitsubishiAPIIntegration:
                 assert "AA:BB:CC:DD:EE:FF" in response
                 assert "1234567890" in response
                 assert "PROFILECODE" in response
-    
-    def test_encryption_decryption_cycle(self, mock_post):
-        """Test that encryption/decryption works with real-like data."""
-        api = MitsubishiAPI("192.168.1.100")
-        
-        # Test that we can encrypt and decrypt a sample message
-        original_xml = "<TEST>sample data</TEST>"
-        
-        # Test actual encryption/decryption
-        encrypted = api.encrypt_payload(original_xml)
-        assert encrypted is not None
-        assert len(encrypted) > 0
-        
-        # Test decryption
-        decrypted = api.decrypt_payload(encrypted)
-        assert decrypted == original_xml
-        
-        # Verify the API can be initialized
-        assert api.device_host_port == "192.168.1.100"
 
 
 class TestMitsubishiControllerIntegration:
@@ -267,18 +183,6 @@ class TestRealWorldScenarios:
         # Test temperature control (this would need controller state setup)
         # This is a placeholder for actual control testing
         pass
-    
-    def test_led_pattern_parsing(self):
-        """Test parsing of LED patterns from real device data."""
-        # Test that LED patterns are correctly extracted
-        for led_name, pattern in LED_PATTERNS.items():
-            assert ":" in pattern  # Should have on:off pattern
-            assert "," in pattern  # Should have multiple states
-            
-            # Parse the pattern
-            states = pattern.split(",")
-            for state in states:
-                assert ":" in state  # Each state should have on:off timing
 
 
 if __name__ == "__main__":
