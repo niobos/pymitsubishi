@@ -11,6 +11,7 @@ import re
 import requests
 import xml.etree.ElementTree as ET
 from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 from Crypto.Random import get_random_bytes
 from requests.auth import HTTPBasicAuth
 from typing import Optional, Dict, Any
@@ -52,78 +53,43 @@ class MitsubishiAPI:
         # Encrypt using AES CBC with zero padding
         cipher = AES.new(self.encryption_key, AES.MODE_CBC, iv)
         
-        # Zero pad the payload to multiple of 16 bytes
         payload_bytes = payload.encode('utf-8')
-        padding_length = KEY_SIZE - (len(payload_bytes) % KEY_SIZE)
-        if padding_length == KEY_SIZE:
-            padding_length = 0
-        padded_payload = payload_bytes + b'\x00' * padding_length
-        
+        padded_payload = pad(payload_bytes, KEY_SIZE, 'iso7816')
+
         encrypted = cipher.encrypt(padded_payload)
         
         return base64.b64encode(iv + encrypted).decode('utf-8')
 
     def decrypt_payload(self, payload_b64: str) -> Optional[str]:
-        """Decrypt payload following TypeScript implementation exactly"""
-        try:
-            # Convert base64 to hex string
-            encrypted = base64.b64decode(payload_b64)
-            hex_buffer = encrypted.hex()
-            
-            logger.debug(f"Base64 payload length: {len(payload_b64)}")
-            logger.debug(f"Hex buffer length: {len(hex_buffer)}")
-            
-            iv = encrypted[:KEY_SIZE]
-            encrypted_data = encrypted[KEY_SIZE:]
+        # Convert base64 to hex string
+        encrypted = base64.b64decode(payload_b64)
 
-            logger.debug(f"IV: {iv.hex()}")
+        logger.debug(f"Base64 payload length: {len(payload_b64)}")
 
-            logger.debug(f"Encrypted data length: {len(encrypted_data)}")
-            logger.debug(f"Encrypted data (first 64 bytes): {encrypted_data[:64].hex()}")
+        iv = encrypted[:KEY_SIZE]
+        encrypted_data = encrypted[KEY_SIZE:]
 
-            cipher = AES.new(self.encryption_key, AES.MODE_CBC, iv)
-            decrypted = cipher.decrypt(encrypted_data)
-            
-            logger.debug(f"Decrypted raw length: {len(decrypted)}")
-            logger.debug(f"Decrypted raw (first 64 bytes): {decrypted[:64]}")
-            logger.debug(f"Decrypted raw (last 64 bytes): {decrypted[-64:]}")
-            
-            # Remove zero padding
-            decrypted_clean = decrypted.rstrip(b'\x00')
-            
-            logger.debug(f"After padding removal length: {len(decrypted_clean)}")
-            logger.debug(f"Non-zero bytes at end: {decrypted_clean[-20:]}")
-            
-            # Try to decode as UTF-8
-            try:
-                result = decrypted_clean.decode('utf-8')
-                return result
-            except UnicodeDecodeError as ude:
-                logger.debug(f"UTF-8 decode error at position {ude.start}: {ude.reason}")
-                logger.debug(f"Problematic bytes: {decrypted_clean[max(0, ude.start-10):ude.start+10]}")
-                
-                # Try to find the actual end of the XML by looking for closing tags
-                xml_end_patterns = [b'</LSV>', b'</CSV>', b'</ESV>']
-                for pattern in xml_end_patterns:
-                    pos = decrypted_clean.find(pattern)
-                    if pos != -1:
-                        end_pos = pos + len(pattern)
-                        truncated = decrypted_clean[:end_pos]
-                        logger.debug(f"Found XML end pattern {pattern} at position {pos}")
-                        logger.debug(f"Truncated length: {len(truncated)}")
-                        try:
-                            return truncated.decode('utf-8')
-                        except UnicodeDecodeError:
-                            continue
-                
-                # If no valid XML end found, try errors='ignore'
-                result = decrypted_clean.decode('utf-8', errors='ignore')
-                logger.debug(f"Using errors='ignore', result length: {len(result)}")
-                return result
-                
-        except Exception as e:
-            logger.error(f"Decryption error: {e}")
-            return None
+        logger.debug(f"IV: {iv.hex()}")
+
+        logger.debug(f"Encrypted data length: {len(encrypted_data)}")
+        logger.debug(f"Encrypted data (first 64 bytes): {encrypted_data[:64].hex()}")
+
+        cipher = AES.new(self.encryption_key, AES.MODE_CBC, iv)
+        decrypted = cipher.decrypt(encrypted_data)
+
+        logger.debug(f"Decrypted raw length: {len(decrypted)}")
+        logger.debug(f"Decrypted raw (first 64 bytes): {decrypted[:64]}")
+        logger.debug(f"Decrypted raw (last 64 bytes): {decrypted[-64:]}")
+
+        decrypted_clean = unpad(decrypted, KEY_SIZE, 'iso7816')
+
+        logger.debug(f"After padding removal length: {len(decrypted_clean)}")
+        logger.debug(f"Non-zero bytes at end: {decrypted_clean[-20:]}")
+
+        # Try to decode as UTF-8
+        result = decrypted_clean.decode('utf-8')  # may raise
+        return result
+
 
     def make_request(self, payload_xml: str) -> Optional[str]:
         """Make HTTP request to the /smart endpoint"""
