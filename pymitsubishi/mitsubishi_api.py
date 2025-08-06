@@ -194,13 +194,12 @@ class MitsubishiAPI:
         payload_xml = f'<CSV><CONNECT>ON</CONNECT><CODE><VALUE>{hex_command}</VALUE></CODE></CSV>'
         return self.make_request(payload_xml)
 
-    def get_unit_info(self, admin_password: str = None) -> Optional[Dict[str, Any]]:
+    def get_unit_info(self) -> Optional[Dict[str, Any]]:
         """Get unit information from the /unitinfo endpoint using admin credentials"""
         try:
             url = f'http://{self.device_host_port}/unitinfo'
             # Use provided password or fall back to instance default
-            password = admin_password or self.admin_password
-            auth = HTTPBasicAuth(self.admin_username, password)
+            auth = HTTPBasicAuth(self.admin_username, self.admin_password)
             
             logger.debug(f"Fetching unit info from {url}")
             
