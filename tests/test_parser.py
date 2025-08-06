@@ -12,8 +12,7 @@ from pymitsubishi.mitsubishi_parser import (
     calc_fcc,
     PowerOnOff, DriveMode, WindSpeed,
     VerticalWindDirection, HorizontalWindDirection,
-    parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command,
-    MitsubishiTemperature,
+    parse_code_values, GeneralStates, ParsedDeviceState, generate_extend08_command,
 )
 
 from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
@@ -34,50 +33,17 @@ def test_fcc(payload, expected):
 
 
 def test_generate_general_command():
-    command = generate_general_command(GeneralStates(), {})
+    command = GeneralStates().generate_general_command({})
     assert command == "fc410130100100020000090000000000000000ac4185"
 
 def test_generate_extend08_command():
     command = generate_extend08_command(GeneralStates(), {})
     assert command == "fc410130100800000000000000000000000000000076"
 
-@pytest.mark.parametrize(
-    'temp,segment14,segment5',
-    [
-        (27.0, 182, 4),
-        (23.5, 175, 0x18),
-        (16.0, 160, 15),
-        (14.0, 156, 15),
-        (31.0, 190, 0),
-        (32.0, 192, 0),
-    ],
-)
-def test_sensor_temperature(temp, segment14, segment5):
-    t = MitsubishiTemperature(temp)
-    assert t == temp
-    assert t.segment5_value == segment5
-    assert t.segment14_value == segment14
-    assert MitsubishiTemperature.from_segment(segment14) == t
-
 def test_parse_sensor_states():
     states = SensorStates.deserialize(bytes.fromhex('fc620130100300000f00b4b2b2fe420001141a0000c4'))
     assert states.outside_temperature == 26.0
-
-class TestModeAndStatusParsing:
-    """Test parsing of mode and status values from real device responses."""
-    
-    def test_power_status_parsing(self):
-        """Test power status parsing with real status codes."""
-        # Real device power status patterns
-        power_codes = ["00", "01", "02", "03", "ff"]
-        
-        for code in power_codes:
-            status = PowerOnOff.from_segment(code)
-            assert status in [PowerOnOff.ON, PowerOnOff.OFF]
-            
-            # Codes 01 and 02 should be ON, others typically OFF
-            if code in ["01", "02"]:
-                assert status == PowerOnOff.ON
+    assert states.room_temperature == 25.0
 
 class TestCodeValueParsing:
     """Test parsing of real CODE values from device responses."""

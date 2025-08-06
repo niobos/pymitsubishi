@@ -29,7 +29,6 @@ from .mitsubishi_parser import (
     ErrorStates,
     ParsedDeviceState,
     parse_code_values,
-    generate_general_command,
     generate_extend08_command
 )
 
@@ -59,6 +58,5 @@ __all__ = [
     
     # Utility functions
     'parse_code_values',
-    'generate_general_command',
     'generate_extend08_command',
 ]

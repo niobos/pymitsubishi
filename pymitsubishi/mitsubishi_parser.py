@@ -21,15 +21,9 @@ MIN_TEMPERATURE = 160  # 16.0°C in 0.1°C units
 MAX_TEMPERATURE = 310  # 31.0°C in 0.1°C units
 
 class PowerOnOff(Enum):
-    OFF = '00'
-    ON = '01'
-
-    @classmethod
-    def from_segment(cls, segment: str) -> PowerOnOff:
-        if segment in ['01', '02']:
-            return PowerOnOff.ON
-        else:
-            return PowerOnOff.OFF
+    OFF = 0
+    ON = 1
+    ON2 = 2
 
 class DriveMode(Enum):
     AUTO = 0
@@ -52,23 +46,8 @@ class DriveMode(Enum):
         }
         return mode_map.get(segment, DriveMode.FAN)
 
-class WindSpeed(Enum):
-    AUTO = 0
-    LEVEL_1 = 1
-    LEVEL_2 = 2
-    LEVEL_3 = 3
-    LEVEL_FULL = 5
-
-    @classmethod
-    def from_segment(cls, segment: str) -> WindSpeed:
-        speed_map = {
-            '00': WindSpeed.AUTO,
-            '01': WindSpeed.LEVEL_1,
-            '02': WindSpeed.LEVEL_2,
-            '03': WindSpeed.LEVEL_3,
-            '05': WindSpeed.LEVEL_FULL,
-        }
-        return speed_map.get(segment, WindSpeed.AUTO)
+class WindSpeed(int):
+    ...
 
 class VerticalWindDirection(Enum):
     AUTO = 0
@@ -78,19 +57,6 @@ class VerticalWindDirection(Enum):
     V4 = 4
     V5 = 5
     SWING = 7
-
-    @classmethod
-    def from_segment(cls, segment: str) -> VerticalWindDirection:
-        direction_map = {
-            '00': VerticalWindDirection.AUTO,
-            '01': VerticalWindDirection.V1,
-            '02': VerticalWindDirection.V2,
-            '03': VerticalWindDirection.V3,
-            '04': VerticalWindDirection.V4,
-            '05': VerticalWindDirection.V5,
-            '07': VerticalWindDirection.SWING,
-        }
-        return direction_map.get(segment, VerticalWindDirection.AUTO)
 
 class HorizontalWindDirection(Enum):
     AUTO = 0
@@ -105,53 +71,23 @@ class HorizontalWindDirection(Enum):
     LCR = 9
     LCR_S = 12
 
-    @classmethod
-    def from_segment(cls, segment: str) -> HorizontalWindDirection:
-        value = int(segment, 16) & 0x7F  # 127 & value
-        try:
-            return HorizontalWindDirection(value)
-        except ValueError:
-            return HorizontalWindDirection.AUTO
-
-class MitsubishiTemperature(float):
-    @classmethod
-    def from_segment(cls, segment: int) -> MitsubishiTemperature:
-        t = (segment - 0x80) * 0.5
-        # TODO: should we cap to 0<=t<=40.0 ?
-        return MitsubishiTemperature(t)
-
-    @property
-    def segment5_value(self) -> int:
-        if self < 16:
-            return 31-16
-        if self > 31:
-            return 31-31
-
-        e = 31 - int(self)
-        frac = self % 1
-        return (0x10 if frac >= 0.5 else 0x00) + e
-
-    @property
-    def segment14_value(self) -> int:
-        return 0x80 + int(self // 0.5)
-
 @dataclass
 class GeneralStates:
     """Parsed general AC states from device response"""
     power_on_off: PowerOnOff = PowerOnOff.OFF
     drive_mode: DriveMode = DriveMode.AUTO
-    temperature: MitsubishiTemperature = MitsubishiTemperature(22.0)
-    wind_speed: WindSpeed = WindSpeed.AUTO
-    vertical_wind_direction_right: VerticalWindDirection = VerticalWindDirection.AUTO
-    vertical_wind_direction_left: VerticalWindDirection = VerticalWindDirection.AUTO
-    horizontal_wind_direction: HorizontalWindDirection = HorizontalWindDirection.AUTO
-    dehum_setting: int = 0
-    is_power_saving: bool = False
-    wind_and_wind_break_direct: int = 0
+    coarse_temperature: int = 22
+    fine_temperature: float | None = 22.0
+    wind_speed: WindSpeed = 0
+    vertical_wind_direction: VerticalWindDirection = VerticalWindDirection.AUTO
+    horizontal_wind_direction: HorizontalWindDirection | None = HorizontalWindDirection.AUTO
+    dehum_setting: int | None = 0
+    is_power_saving: bool | None = False
+    wind_and_wind_break_direct: int | None = 0
     # Enhanced functionality based on SwiCago insights
     i_see_sensor: bool = False  # i-See sensor active flag
     mode_raw_value: int = 0     # Raw mode value before i-See processing
-    wide_vane_adjustment: bool = False  # Wide vane adjustment flag (SwiCago wideVaneAdj)
+    wide_vane_adjustment: bool | None = False  # Wide vane adjustment flag (SwiCago wideVaneAdj)
     temp_mode: bool = False     # Direct temperature mode flag (SwiCago tempMode)
     undocumented_flags: Dict[str, Any] = None  # Store unknown bit patterns for analysis
 
@@ -167,94 +103,136 @@ class GeneralStates:
         logger.debug(f"GeneralState.deserialize: {data.hex()}")
         if len(data) < 21:
             raise ValueError("Data too short")
+        obj = cls.__new__(cls)
         payload = data.hex()
 
-        power_on_off = PowerOnOff.from_segment(format(data[8], "02x"))
+        # Compared to the SwiCago implementation, we have an offset of 5:
+        # SwiCago's data[0] is our data[5]
 
-        # Our payload structure starts with 'fc62013010' (5 bytes) then data begins
-        # So data[0] is at position 10-11, data[1] at 12-13, etc.
-        # data[5] (temp segment) would be at position 20-21
-        # data[11] (direct temp) would be at position 32-33
-
-        if len(payload) > 33:  # Check if we have data[11] position (32-33)
-            temp_direct_raw = data[16]  # data[11] in SwiCago
-            if temp_direct_raw != 0x00:
-                # Direct temperature mode (SwiCago tempMode = true)
-                temp_mode = True
-                temperature = MitsubishiTemperature.from_segment(temp_direct_raw)
-            else:
-                # Segment-based temperature (SwiCago tempMode = false)
-                temp_mode = False
-                if len(payload) > 21:  # Check if we have data[5] position (20-21)
-                    temperature = MitsubishiTemperature.from_segment(data[10])  # data[5] in SwiCago
-        elif len(payload) > 21:  # Fallback to segment-based parsing if we don't have data[11]
-            temperature = MitsubishiTemperature.from_segment(data[10])
+        obj.power_on_off = PowerOnOff(data[8])
 
         # Enhanced mode parsing with i-See sensor detection
-        mode_byte = data[9] # data[4] in SwiCago
-        drive_mode, i_see_active, raw_mode = GeneralStates.parse_mode_with_i_see(mode_byte)
+        obj.drive_mode = DriveMode(data[9] & 0x07)
+        obj.i_see_sensor = bool(data[9] & 0x08)
 
-        wind_speed = WindSpeed.from_segment(payload[22:24])  # data[6] in SwiCago
-        right_vertical_wind_direction = VerticalWindDirection.from_segment(payload[24:26])  # data[7] in SwiCago
-        left_vertical_wind_direction = VerticalWindDirection.from_segment(payload[40:42])
+        obj.coarse_temperature = cls._from_coarse_temperature(data[10])
 
-        # Enhanced wide vane parsing with adjustment flag (SwiCago)
-        wide_vane_data = data[15] if len(payload) > 31 else 0  # data[10] in SwiCago
-        horizontal_wind_direction = HorizontalWindDirection.from_segment(f"{wide_vane_data & 0x0F:02x}")  # Lower 4 bits
-        wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
+        obj.wind_speed = WindSpeed(data[11])
+        obj.vertical_wind_direction = VerticalWindDirection(data[12])
 
-        # Extra states
-        dehum_setting = data[17] if len(payload) > 35 else 0
-        is_power_saving = data[18] > 0 if len(payload) > 37 else False
-        wind_and_wind_break_direct = data[19] if len(payload) > 39 else 0
+        if len(data) >= 16:
+            wide_vane_data = data[15]
+            obj.horizontal_wind_direction = HorizontalWindDirection(wide_vane_data & 0x0F)  # Lower 4 bits
+            obj.wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
+        else:
+            obj.horizontal_wind_direction = None
+            obj.wide_vane_adjustment = None
+
+        if len(data) >= 17 and data[16] != 0x00:
+            obj.fine_temperature = cls._from_fine_temperature(data[16])
+        else:
+            obj.fine_temperature = None
+
+        if len(data) >= 18:
+            obj.dehum_setting = data[17]
+        else:
+            obj.dehum_setting = None
+
+        if len(data) >= 19:
+            obj.is_power_saving = data[18] > 0
+        else:
+            obj.is_power_saving = None
+
+        if len(data) >= 20:
+            obj.wind_and_wind_break_direct = data[19]
+        else:
+            obj.wind_and_wind_break_direct = None
 
         # Analyze undocumented bits for research purposes
-        undocumented_analysis = analyze_undocumented_bits(payload)
+        obj.undocumented_analysis = analyze_undocumented_bits(payload)
 
-        return GeneralStates(
-            power_on_off=power_on_off,
-            temperature=temperature,
-            drive_mode=drive_mode,
-            wind_speed=wind_speed,
-            vertical_wind_direction_right=right_vertical_wind_direction,
-            vertical_wind_direction_left=left_vertical_wind_direction,
-            horizontal_wind_direction=horizontal_wind_direction,
-            dehum_setting=dehum_setting,
-            is_power_saving=is_power_saving,
-            wind_and_wind_break_direct=wind_and_wind_break_direct,
-            # Enhanced functionality based on SwiCago
-            i_see_sensor=i_see_active,
-            mode_raw_value=raw_mode,
-            wide_vane_adjustment=wide_vane_adjustment,
-            temp_mode=temp_mode,
-            undocumented_flags=undocumented_analysis if undocumented_analysis.get('suspicious_patterns') or undocumented_analysis.get('unknown_segments') else None,
-        )
+        return obj
+
+    def generate_general_command(self, controls: Dict[str, bool]) -> str:
+        """Generate general control command hex string"""
+        segments = {
+            'segment0': '01',
+            'segment1': '00',
+            'segment2': '00',
+            'segment3': '00',
+            'segment4': '00',
+            'segment5': '00',
+            'segment6': '00',
+            'segment7': '00',
+            'segment13': '00',
+            'segment14': '00',
+            'segment15': '00',
+        }
+
+        # Calculate segment 1 value (control flags)
+        segment1_value = 0
+        if controls.get('power_on_off'):
+            segment1_value |= 0x01
+        if controls.get('drive_mode'):
+            segment1_value |= 0x02
+        if controls.get('temperature'):
+            segment1_value |= 0x04
+        if controls.get('wind_speed'):
+            segment1_value |= 0x08
+        if controls.get('up_down_wind_direct'):
+            segment1_value |= 0x10
+
+        # Calculate segment 2 value
+        segment2_value = 0
+        if controls.get('left_right_wind_direct'):
+            segment2_value |= 0x01
+        if controls.get('outside_control', True):  # Default true
+            segment2_value |= 0x02
+
+        segments['segment1'] = f"{segment1_value:02x}"
+        segments['segment2'] = f"{segment2_value:02x}"
+        segments['segment3'] = format(self.power_on_off.value, "02x")
+        segments['segment4'] = format(self.drive_mode.value, "02x")
+        segments['segment6'] = f"{self.wind_speed:02x}"
+        segments['segment7'] = f"{self.vertical_wind_direction.value:02x}"
+        segments['segment13'] = f"{self.horizontal_wind_direction.value:02x}"
+        segments['segment15'] = '41'  # checkInside: 41 true, 42 false
+
+        segments['segment5'] = format(self._to_coarse_temperature(self.coarse_temperature), "02x")
+        segments['segment14'] = format(self._to_fine_temperature(self.fine_temperature), "02x")
+
+        # Build payload
+        payload = '41013010'
+        for i in range(16):
+            segment_key = f'segment{i}'
+            payload += segments.get(segment_key, '00')
+
+        # Calculate and append FCC
+        fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
+        return "fc" + payload + fcc
 
     @staticmethod
-    def parse_mode_with_i_see(mode_byte: int) -> tuple[DriveMode, bool, int]:
-        """Parse drive mode considering i-See sensor flag (SwiCago enhancement)
+    def _from_coarse_temperature(value: int) -> int:
+        return 31 - value
+    @staticmethod
+    def _to_coarse_temperature(temp: int) -> int:
+        if not 16 <= temp <= 31:
+            raise ValueError(f"Invalid temperature value {temp}")
+        return 31 - int(temp)
+    @staticmethod
+    def _from_fine_temperature(value: int) -> float:
+        return (value - 0x80) * 0.5
+    @staticmethod
+    def _to_fine_temperature(temp: float | None) -> int:
+        if temp is None:
+            return 0x00
+        return 0x80 + int(temp // 0.5)
 
-        Based on SwiCago implementation: i-See sensor is detected when mode > 0x08.
-        The actual mode is extracted by subtracting 0x08 from the raw mode value.
-
-        Args:
-            mode_byte: Raw mode byte value from payload
-
-        Returns:
-            tuple of (drive_mode, i_see_active, raw_mode_value)
-        """
-        # Check if i-See sensor flag is set (mode > 0x08 as per SwiCago)
-        i_see_active = mode_byte > 0x08
-
-        # Extract actual mode by removing i-See flag if present
-        # This matches SwiCago's logic: receivedSettings.iSee ? (data[4] - 0x08) : data[4]
-        actual_mode_value = mode_byte - 0x08 if i_see_active else mode_byte
-
-        # Map the mode value to DriveMode enum
-        drive_mode = DriveMode.from_segment(actual_mode_value)
-
-        return drive_mode, i_see_active, mode_byte
-
+    @property
+    def temperature(self) -> float:
+        if self.fine_temperature is not None:
+            return self.fine_temperature
+        return self.coarse_temperature
 
 
 @dataclass
@@ -277,8 +255,8 @@ class SensorStates:
         if len(payload) < 21:
             raise ValueError("Payload too short")
 
-        outside_temperature = MitsubishiTemperature.from_segment(payload[10])
-        room_temperature = MitsubishiTemperature.from_segment(payload[12])
+        outside_temperature = GeneralStates._from_fine_temperature(payload[10])
+        room_temperature = GeneralStates._from_fine_temperature(payload[12])
         thermal_sensor = (payload[19] & 0x01) != 0
         wind_speed_pr557 = 1 if (payload[20] & 0x01) == 1 else 0
 
@@ -539,11 +517,11 @@ def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_s
     
     # Fan power addition
     fan_power_map = {
-        WindSpeed.AUTO: 50,      # Variable
-        WindSpeed.LEVEL_1: 30,   # Low speed
-        WindSpeed.LEVEL_2: 60,   # Medium-low
-        WindSpeed.LEVEL_3: 90,   # Medium-high
-        WindSpeed.LEVEL_FULL: 120, # High speed
+        0: 50,      # Variable
+        1: 30,   # Low speed
+        2: 60,   # Medium-low
+        3: 90,   # Medium-high
+        4: 120, # High speed
     }
     
     fan_power = fan_power_map.get(fan_speed, 50)
@@ -578,64 +556,6 @@ def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
             parsed_state.energy = EnergyStates.deserialize(value, parsed_state.general)
     
     return parsed_state
-
-def generate_general_command(general_states: GeneralStates, controls: Dict[str, bool]) -> str:
-    """Generate general control command hex string"""
-    segments = {
-        'segment0': '01',
-        'segment1': '00',
-        'segment2': '00',
-        'segment3': '00',
-        'segment4': '00',
-        'segment5': '00',
-        'segment6': '00',
-        'segment7': '00',
-        'segment13': '00',
-        'segment14': '00',
-        'segment15': '00',
-    }
-    
-    # Calculate segment 1 value (control flags)
-    segment1_value = 0
-    if controls.get('power_on_off'):
-        segment1_value |= 0x01
-    if controls.get('drive_mode'):
-        segment1_value |= 0x02
-    if controls.get('temperature'):
-        segment1_value |= 0x04
-    if controls.get('wind_speed'):
-        segment1_value |= 0x08
-    if controls.get('up_down_wind_direct'):
-        segment1_value |= 0x10
-    
-    # Calculate segment 2 value
-    segment2_value = 0
-    if controls.get('left_right_wind_direct'):
-        segment2_value |= 0x01
-    if controls.get('outside_control', True):  # Default true
-        segment2_value |= 0x02
-    
-    segments['segment1'] = f"{segment1_value:02x}"
-    segments['segment2'] = f"{segment2_value:02x}"
-    segments['segment3'] = general_states.power_on_off.value
-    segments['segment4'] = format(general_states.drive_mode.value, "02x")
-    segments['segment6'] = f"{general_states.wind_speed.value:02x}"
-    segments['segment7'] = f"{general_states.vertical_wind_direction_right.value:02x}"
-    segments['segment13'] = f"{general_states.horizontal_wind_direction.value:02x}"
-    segments['segment15'] = '41'  # checkInside: 41 true, 42 false
-    
-    segments['segment5'] = format(general_states.temperature.segment5_value, "02x")
-    segments['segment14'] = format(general_states.temperature.segment14_value, "02x")
-    
-    # Build payload
-    payload = '41013010'
-    for i in range(16):
-        segment_key = f'segment{i}'
-        payload += segments.get(segment_key, '00')
-    
-    # Calculate and append FCC
-    fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
-    return "fc" + payload + fcc
 
 def generate_extend08_command(general_states: GeneralStates, controls: Dict[str, bool]) -> str:
     """Generate extend08 command for buzzer, dehum, power saving, etc."""

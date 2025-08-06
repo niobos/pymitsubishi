@@ -166,7 +166,7 @@ class TestMitsubishiControllerIntegration:
             mock_state.general.power_on_off = PowerOnOff.ON
             mock_state.general.drive_mode = DriveMode.COOLER
             mock_state.general.temperature = 225  # 22.5°C
-            mock_state.general.wind_speed = WindSpeed.AUTO
+            mock_state.general.wind_speed = 0
             mock_state.sensors = Mock()
             mock_state.sensors.room_temperature = 220  # 22.0°C
             mock_state.sensors.outside_temperature = 200  # 20.0°C

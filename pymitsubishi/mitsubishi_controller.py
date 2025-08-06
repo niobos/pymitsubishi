@@ -14,7 +14,7 @@ from .mitsubishi_api import MitsubishiAPI
 from .mitsubishi_parser import (
     PowerOnOff, DriveMode, WindSpeed, VerticalWindDirection,
     HorizontalWindDirection, GeneralStates, ParsedDeviceState,
-    parse_code_values, generate_general_command, generate_extend08_command, MitsubishiTemperature
+    parse_code_values, generate_extend08_command,
 )
 from .mitsubishi_capabilities import CapabilityDetector, DeviceCapabilities
 
@@ -185,7 +185,7 @@ class MitsubishiController:
             return False
             
         # Convert to 0.1°C units and validate range
-        temp_units = MitsubishiTemperature(temperature_celsius)
+        temp_units = temperature_celsius
         if temp_units < 16.0 or temp_units > 32.0:  # 16°C to 32°C
             logger.info(f"❌ Temperature {temperature_celsius}°C is out of range (16-32°C)")
             return False
@@ -263,7 +263,7 @@ class MitsubishiController:
     def _send_general_control_command(self, state: GeneralStates, controls: Dict[str, bool]) -> bool:
         """Send a general control command to the device"""
         # Generate the hex command
-        hex_command = generate_general_command(state, controls)
+        hex_command = state.generate_general_command(controls)
         
         logger.debug(f"🔧 Sending command: {hex_command}")
             
@@ -322,11 +322,10 @@ class MitsubishiController:
                 'power': 'ON' if self.state.general.power_on_off == PowerOnOff.ON else 'OFF',
                 'mode': self.state.general.drive_mode.name,
                 'target_temp': self.state.general.temperature,
-                'fan_speed': self.state.general.wind_speed.name,
+                'fan_speed': self.state.general.wind_speed,
                 'dehumidifier_setting': self.state.general.dehum_setting,
                 'power_saving_mode': self.state.general.is_power_saving,
-                'vertical_vane_right': self.state.general.vertical_wind_direction_right.name,
-                'vertical_vane_left': self.state.general.vertical_wind_direction_left.name,
+                'vertical_vane': self.state.general.vertical_wind_direction.name,
                 'horizontal_vane': self.state.general.horizontal_wind_direction.name,
             })
             
