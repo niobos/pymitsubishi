@@ -163,24 +163,9 @@ class ParsedDeviceState:
             
         return result
 
-def calc_fcc(payload_hex: str) -> str:
+def calc_fcc(payload: bytes) -> int:
     """Calculate FCC checksum for Mitsubishi protocol payload"""
-    total = 0
-    # Process 20 pairs of hex characters (40 characters total)
-    for i in range(20):
-        start_pos = 2 * i
-        end_pos = start_pos + 2
-        if start_pos < len(payload_hex):
-            hex_pair = payload_hex[start_pos:end_pos]
-            if len(hex_pair) == 2:
-                total += int(hex_pair, 16)
-    
-    # Calculate checksum: 256 - (total % 256)
-    checksum = 256 - (total % 256)
-    checksum_hex = format(checksum, '02x')
-    
-    # Return last 2 characters
-    return checksum_hex[-2:]
+    return 0x100 - (sum(payload[0:20]) % 0x100)  # TODO: do we actually need to limit this to 20 bytes?
 
 def convert_temperature(temperature: int) -> str:
     """Convert temperature in 0.1°C units to segment format"""
@@ -654,7 +639,7 @@ def generate_general_command(general_states: GeneralStates, controls: Dict[str, 
         payload += segments.get(segment_key, '00')
     
     # Calculate and append FCC
-    fcc = calc_fcc(payload)
+    fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
     return "fc" + payload + fcc
 
 def generate_extend08_command(general_states: GeneralStates, controls: Dict[str, bool]) -> str:
@@ -676,5 +661,5 @@ def generate_extend08_command(general_states: GeneralStates, controls: Dict[str,
     buzzer_segment = '01' if controls.get('buzzer') else '00'
     
     payload = "4101301008" + segment_x + "0000" + segment_y + segment_z + segment_a + buzzer_segment + "0000000000000000"
-    fcc = calc_fcc(payload)
+    fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
     return 'fc' + payload + fcc

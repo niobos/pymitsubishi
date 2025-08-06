@@ -11,7 +11,7 @@ from pymitsubishi.mitsubishi_parser import (
     get_normalized_temperature, get_on_off_status, get_drive_mode,
     get_wind_speed, PowerOnOff, DriveMode, WindSpeed,
     VerticalWindDirection, HorizontalWindDirection,
-    parse_code_values, GeneralStates, ParsedDeviceState
+    parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command
 )
 
 from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
@@ -27,9 +27,17 @@ from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
     ],
 )
 def test_fcc(payload, expected):
-    checksum = calc_fcc(payload.hex())
-    assert checksum == format(expected, '02x')
+    checksum = calc_fcc(payload)
+    assert checksum == expected
 
+
+def test_generate_general_command():
+    command = generate_general_command(GeneralStates(), {})
+    assert command == "fc410130100100020008090000000000000000ac417d"
+
+def test_generate_extend08_command():
+    command = generate_extend08_command(GeneralStates(), {})
+    assert command == "fc410130100800000000000000000000000000000076"
 
 class TestTemperatureConversion:
     """Test temperature conversion functions with real values."""
