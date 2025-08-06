@@ -61,32 +61,23 @@ class MitsubishiAPI:
         
         encrypted = cipher.encrypt(padded_payload)
         
-        # TypeScript approach: IV as hex + encrypted as hex, then base64 encode the combined hex
-        iv_hex = iv.hex()
-        encrypted_hex = encrypted.hex()
-        combined_hex = iv_hex + encrypted_hex
-        combined_bytes = bytes.fromhex(combined_hex)
-        return base64.b64encode(combined_bytes).decode('utf-8')
+        return base64.b64encode(iv + encrypted).decode('utf-8')
 
-    def decrypt_payload(self, payload: str) -> Optional[str]:
+    def decrypt_payload(self, payload_b64: str) -> Optional[str]:
         """Decrypt payload following TypeScript implementation exactly"""
         try:
             # Convert base64 to hex string
-            hex_buffer = base64.b64decode(payload).hex()
+            encrypted = base64.b64decode(payload_b64)
+            hex_buffer = encrypted.hex()
             
-            logger.debug(f"Base64 payload length: {len(payload)}")
+            logger.debug(f"Base64 payload length: {len(payload_b64)}")
             logger.debug(f"Hex buffer length: {len(hex_buffer)}")
             
-            # Extract IV from first 2 * KEY_SIZE hex characters
-            iv_hex = hex_buffer[:2 * KEY_SIZE]
-            iv = bytes.fromhex(iv_hex)
-            
+            iv = encrypted[:KEY_SIZE]
+            encrypted_data = encrypted[KEY_SIZE:]
+
             logger.debug(f"IV: {iv.hex()}")
-            
-            # Extract the encrypted portion
-            encrypted_hex = hex_buffer[2 * KEY_SIZE:]
-            encrypted_data = bytes.fromhex(encrypted_hex)
-            
+
             logger.debug(f"Encrypted data length: {len(encrypted_data)}")
             logger.debug(f"Encrypted data (first 64 bytes): {encrypted_data[:64].hex()}")
 
