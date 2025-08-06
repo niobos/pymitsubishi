@@ -12,7 +12,7 @@ from pymitsubishi.mitsubishi_parser import (
     PowerOnOff, DriveMode, WindSpeed,
     VerticalWindDirection, HorizontalWindDirection,
     parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command,
-    MitsubishiSensorTemperature, parse_sensor_states
+    MitsubishiSensorTemperature, parse_sensor_states, parse_general_states
 )
 
 from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
@@ -43,6 +43,10 @@ def test_generate_extend08_command():
 def test_outside_temperature():
     t = MitsubishiSensorTemperature.from_segment(182)
     assert t == 27.0
+
+def test_parse_general_states():
+    states = parse_general_states(bytes.fromhex('fc620130100200000003080000000083ae46000000d9'))
+    assert states.drive_mode == DriveMode.COOLER
 
 def test_parse_sensor_states():
     states = parse_sensor_states(bytes.fromhex('fc620130100300000f00b4b2b2fe420001141a0000c4'))

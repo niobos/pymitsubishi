@@ -447,7 +447,7 @@ def parse_energy_states(payload: str, general_states: Optional[GeneralStates] = 
     except (ValueError, IndexError):
         return None
 
-def parse_general_states(payload: str) -> Optional[GeneralStates]:
+def parse_general_states(payload_b: bytes) -> Optional[GeneralStates]:
     """Parse general states from hex payload with enhanced SwiCago-based parsing
     
     Enhanced with SwiCago insights:
@@ -455,6 +455,7 @@ def parse_general_states(payload: str) -> Optional[GeneralStates]:
     - Wide vane adjustment flag detection
     - i-See sensor detection from mode byte
     """
+    payload = payload_b.hex()
     if len(payload) < 42:
         return None
     
@@ -472,7 +473,7 @@ def parse_general_states(payload: str) -> Optional[GeneralStates]:
         # data[11] (direct temp) would be at position 32-33
         
         if len(payload) > 33:  # Check if we have data[11] position (32-33)
-            temp_direct_raw = int(payload[32:34], 16)  # data[11] in SwiCago
+            temp_direct_raw = payload_b[16]  # data[11] in SwiCago
             if temp_direct_raw != 0x00:
                 # Direct temperature mode (SwiCago tempMode = true)
                 temp_mode = True
@@ -482,12 +483,12 @@ def parse_general_states(payload: str) -> Optional[GeneralStates]:
                 # Segment-based temperature (SwiCago tempMode = false)
                 temp_mode = False
                 if len(payload) > 21:  # Check if we have data[5] position (20-21)
-                    temperature = get_normalized_temperature(int(payload[20:22], 16))  # data[5] in SwiCago
+                    temperature = get_normalized_temperature(payload_b[10])  # data[5] in SwiCago
         elif len(payload) > 21:  # Fallback to segment-based parsing if we don't have data[11]
-            temperature = get_normalized_temperature(int(payload[20:22], 16))
+            temperature = get_normalized_temperature(payload_b[10])
         
         # Enhanced mode parsing with i-See sensor detection
-        mode_byte = int(payload[18:20], 16)  # data[4] in SwiCago
+        mode_byte = payload_b[9]  # data[4] in SwiCago
         drive_mode, i_see_active, raw_mode = parse_mode_with_i_see(mode_byte)
         
         wind_speed = WindSpeed.from_segment(payload[22:24])  # data[6] in SwiCago
@@ -495,14 +496,14 @@ def parse_general_states(payload: str) -> Optional[GeneralStates]:
         left_vertical_wind_direction = VerticalWindDirection.from_segment(payload[40:42])
         
         # Enhanced wide vane parsing with adjustment flag (SwiCago)
-        wide_vane_data = int(payload[30:32], 16) if len(payload) > 31 else 0  # data[10] in SwiCago
+        wide_vane_data = payload_b[15] if len(payload) > 31 else 0  # data[10] in SwiCago
         horizontal_wind_direction = HorizontalWindDirection.from_segment(f"{wide_vane_data & 0x0F:02x}")  # Lower 4 bits
         wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
         
         # Extra states
-        dehum_setting = int(payload[34:36], 16) if len(payload) > 35 else 0
-        is_power_saving = int(payload[36:38], 16) > 0 if len(payload) > 37 else False
-        wind_and_wind_break_direct = int(payload[38:40], 16) if len(payload) > 39 else 0
+        dehum_setting = payload_b[17] if len(payload) > 35 else 0
+        is_power_saving = payload_b[18] > 0 if len(payload) > 37 else False
+        wind_and_wind_break_direct = payload_b[19] if len(payload) > 39 else 0
         
         # Analyze undocumented bits for research purposes
         undocumented_analysis = analyze_undocumented_bits(payload)
@@ -580,7 +581,7 @@ def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
             
         # Parse different payload types
         if is_general_states_payload(hex_lower):
-            parsed_state.general = parse_general_states(hex_lower)
+            parsed_state.general = parse_general_states(value)
         elif is_sensor_states_payload(hex_lower):
             parsed_state.sensors = parse_sensor_states(value)
         elif is_error_states_payload(hex_lower):
