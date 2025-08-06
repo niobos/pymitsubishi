@@ -7,11 +7,11 @@ collected from real Mitsubishi MAC-577IF-2E devices.
 
 import pytest
 from pymitsubishi.mitsubishi_parser import (
-    calc_fcc, convert_temperature, convert_temperature_to_segment,
+    calc_fcc,
     PowerOnOff, DriveMode, WindSpeed,
     VerticalWindDirection, HorizontalWindDirection,
     parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command,
-    MitsubishiSensorTemperature, parse_sensor_states, parse_general_states
+    MitsubishiTemperature, parse_sensor_states, parse_general_states
 )
 
 from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
@@ -39,9 +39,23 @@ def test_generate_extend08_command():
     command = generate_extend08_command(GeneralStates(), {})
     assert command == "fc410130100800000000000000000000000000000076"
 
-def test_sensor_temperature():
-    t = MitsubishiSensorTemperature.from_segment(182)
-    assert t == 27.0
+@pytest.mark.parametrize(
+    'temp,segment14,segment5',
+    [
+        (27.0, 182, 4),
+        (23.5, 175, 0x18),
+        (16.0, 160, 15),
+        (14.0, 156, 15),
+        (31.0, 190, 0),
+        (32.0, 192, 0),
+    ],
+)
+def test_sensor_temperature(temp, segment14, segment5):
+    t = MitsubishiTemperature(temp)
+    assert t == temp
+    assert t.segment5_value == segment5
+    assert t.segment14_value == segment14
+    assert MitsubishiTemperature.from_segment(segment14) == t
 
 def test_parse_general_states():
     states = parse_general_states(bytes.fromhex('fc620130100200000003080000000083ae46000000d9'))
@@ -51,32 +65,6 @@ def test_parse_general_states():
 def test_parse_sensor_states():
     states = parse_sensor_states(bytes.fromhex('fc620130100300000f00b4b2b2fe420001141a0000c4'))
     assert states.outside_temperature == 26.0
-
-class TestTemperatureConversion:
-    """Test temperature conversion functions with real values."""
-    
-    def test_temperature_conversion_real_values(self):
-        """Test temperature conversion with actual AC temperature values."""
-        # Test common AC temperature settings
-        real_temps = [160, 180, 200, 220, 240, 260, 280, 300, 320]  # 16-32°C
-        
-        for temp_units in real_temps:
-            # Test segment conversion
-            segment = convert_temperature(temp_units)
-            assert len(segment) == 2
-            
-            # Test segment format conversion  
-            segment14 = convert_temperature_to_segment(temp_units)
-            assert len(segment14) == 2
-
-    def test_temperature_edge_cases(self):
-        """Test temperature conversion edge cases."""
-        # Test minimum temperature (16°C = 160 units)
-        assert convert_temperature(160) is not None
-        
-        # Test maximum temperature (32°C = 320 units)  
-        assert convert_temperature(320) is not None
-
 
 class TestModeAndStatusParsing:
     """Test parsing of mode and status values from real device responses."""

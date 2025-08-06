@@ -12,9 +12,9 @@ import logging
 
 from .mitsubishi_api import MitsubishiAPI
 from .mitsubishi_parser import (
-    PowerOnOff, DriveMode, WindSpeed, VerticalWindDirection, 
-    HorizontalWindDirection, GeneralStates, ParsedDeviceState, 
-    parse_code_values, generate_general_command, generate_extend08_command
+    PowerOnOff, DriveMode, WindSpeed, VerticalWindDirection,
+    HorizontalWindDirection, GeneralStates, ParsedDeviceState,
+    parse_code_values, generate_general_command, generate_extend08_command, MitsubishiTemperature
 )
 from .mitsubishi_capabilities import CapabilityDetector, DeviceCapabilities
 
@@ -185,8 +185,8 @@ class MitsubishiController:
             return False
             
         # Convert to 0.1°C units and validate range
-        temp_units = int(temperature_celsius * 10)
-        if temp_units < 160 or temp_units > 320:  # 16°C to 32°C
+        temp_units = MitsubishiTemperature(temperature_celsius)
+        if temp_units < 16.0 or temp_units > 32.0:  # 16°C to 32°C
             logger.info(f"❌ Temperature {temperature_celsius}°C is out of range (16-32°C)")
             return False
             
@@ -321,7 +321,7 @@ class MitsubishiController:
             summary.update({
                 'power': 'ON' if self.state.general.power_on_off == PowerOnOff.ON else 'OFF',
                 'mode': self.state.general.drive_mode.name,
-                'target_temp': self.state.general.temperature / 10.0,
+                'target_temp': self.state.general.temperature,
                 'fan_speed': self.state.general.wind_speed.name,
                 'dehumidifier_setting': self.state.general.dehum_setting,
                 'power_saving_mode': self.state.general.is_power_saving,

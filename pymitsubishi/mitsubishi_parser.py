@@ -110,31 +110,34 @@ class HorizontalWindDirection(Enum):
         except ValueError:
             return HorizontalWindDirection.AUTO
 
-class MitsubishiSensorTemperature(float):
+class MitsubishiTemperature(float):
     @classmethod
-    def from_segment(cls, segment: int) -> MitsubishiSensorTemperature:
+    def from_segment(cls, segment: int) -> MitsubishiTemperature:
         t = (segment - 0x80) * 0.5
         # TODO: should we cap to 0<=t<=40.0 ?
-        return MitsubishiSensorTemperature(t)
+        return MitsubishiTemperature(t)
 
-def convert_temperature(temperature: int) -> str:
-    """Convert temperature in 0.1°C units to segment format"""
-    t = max(MIN_TEMPERATURE, min(MAX_TEMPERATURE, temperature))
-    e = 31 - (t // 10)
-    last_digit = '0' if str(t)[-1] == '0' else '1'
-    return last_digit + format(e, 'x')
+    @property
+    def segment5_value(self) -> int:
+        if self < 16:
+            return 31-16
+        if self > 31:
+            return 31-31
 
-def convert_temperature_to_segment(temperature: int) -> str:
-    """Convert temperature to segment 14 format"""
-    value = 0x80 + (temperature // 5)
-    return format(value, '02x')
+        e = 31 - int(self)
+        frac = self % 1
+        return (0x10 if frac >= 0.5 else 0x00) + e
+
+    @property
+    def segment14_value(self) -> int:
+        return 0x80 + int(self // 0.5)
 
 @dataclass
 class GeneralStates:
     """Parsed general AC states from device response"""
     power_on_off: PowerOnOff = PowerOnOff.OFF
     drive_mode: DriveMode = DriveMode.AUTO
-    temperature: int = 220  # 22.0°C in 0.1°C units
+    temperature: MitsubishiTemperature = MitsubishiTemperature(22.0)
     wind_speed: WindSpeed = WindSpeed.AUTO
     vertical_wind_direction_right: VerticalWindDirection = VerticalWindDirection.AUTO
     vertical_wind_direction_left: VerticalWindDirection = VerticalWindDirection.AUTO
@@ -197,7 +200,7 @@ class ParsedDeviceState:
             result['general_states'] = {
                 'power': 'ON' if self.general.power_on_off == PowerOnOff.ON else 'OFF',
                 'mode': self.general.drive_mode.name,
-                'target_temperature_celsius': self.general.temperature / 10.0,
+                'target_temperature_celsius': self.general.temperature,
                 'fan_speed': self.general.wind_speed.name,
                 'vertical_wind_direction_right': self.general.vertical_wind_direction_right.name,
                 'vertical_wind_direction_left': self.general.vertical_wind_direction_left.name,
@@ -470,14 +473,14 @@ def parse_general_states(payload_b: bytes) -> Optional[GeneralStates]:
             if temp_direct_raw != 0x00:
                 # Direct temperature mode (SwiCago tempMode = true)
                 temp_mode = True
-                temperature = MitsubishiSensorTemperature.from_segment(temp_direct_raw)
+                temperature = MitsubishiTemperature.from_segment(temp_direct_raw)
             else:
                 # Segment-based temperature (SwiCago tempMode = false)
                 temp_mode = False
                 if len(payload) > 21:  # Check if we have data[5] position (20-21)
-                    temperature = MitsubishiSensorTemperature.from_segment(payload_b[10])  # data[5] in SwiCago
+                    temperature = MitsubishiTemperature.from_segment(payload_b[10])  # data[5] in SwiCago
         elif len(payload) > 21:  # Fallback to segment-based parsing if we don't have data[11]
-            temperature = MitsubishiSensorTemperature.from_segment(payload_b[10])
+            temperature = MitsubishiTemperature.from_segment(payload_b[10])
         
         # Enhanced mode parsing with i-See sensor detection
         mode_byte = payload_b[9]  # data[4] in SwiCago
@@ -526,8 +529,8 @@ def parse_sensor_states(payload: bytes) -> Optional[SensorStates]:
         return None
     
     try:
-        outside_temperature = MitsubishiSensorTemperature.from_segment(payload[10])
-        room_temperature = MitsubishiSensorTemperature.from_segment(payload[12])
+        outside_temperature = MitsubishiTemperature.from_segment(payload[10])
+        room_temperature = MitsubishiTemperature.from_segment(payload[12])
         thermal_sensor = (payload[19] & 0x01) != 0
         wind_speed_pr557 = 1 if (payload[20] & 0x01) == 1 else 0
         
@@ -630,8 +633,8 @@ def generate_general_command(general_states: GeneralStates, controls: Dict[str, 
     segments['segment13'] = f"{general_states.horizontal_wind_direction.value:02x}"
     segments['segment15'] = '41'  # checkInside: 41 true, 42 false
     
-    segments['segment5'] = convert_temperature(general_states.temperature)
-    segments['segment14'] = convert_temperature_to_segment(general_states.temperature)
+    segments['segment5'] = format(general_states.temperature.segment5_value, "02x")
+    segments['segment14'] = format(general_states.temperature.segment14_value, "02x")
     
     # Build payload
     payload = '41013010'
