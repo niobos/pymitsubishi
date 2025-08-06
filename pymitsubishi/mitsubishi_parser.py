@@ -126,65 +126,47 @@ class GeneralStates:
 
         return obj
 
-    def generate_general_command(self, controls: Dict[str, bool]) -> str:
-        """Generate general control command hex string"""
-        segments = {
-            'segment0': '01',
-            'segment1': '00',
-            'segment2': '00',
-            'segment3': '00',
-            'segment4': '00',
-            'segment5': '00',
-            'segment6': '00',
-            'segment7': '00',
-            'segment13': '00',
-            'segment14': '00',
-            'segment15': '00',
-        }
-
+    def generate_general_command(self, controls: Dict[str, bool]) -> bytes:
         # Calculate segment 1 value (control flags)
-        segment1_value = 0
+        control_flags = 0
         if controls.get('power_on_off'):
-            segment1_value |= 0x01
+            control_flags |= 0x01
         if controls.get('drive_mode'):
-            segment1_value |= 0x02
+            control_flags |= 0x02
         if controls.get('temperature'):
-            segment1_value |= 0x04
+            control_flags |= 0x04
         if controls.get('wind_speed'):
-            segment1_value |= 0x08
+            control_flags |= 0x08
         if controls.get('up_down_wind_direct'):
-            segment1_value |= 0x10
+            control_flags |= 0x10
 
         # Calculate segment 2 value
-        segment2_value = 0
+        control_flags2 = 0
         if controls.get('left_right_wind_direct'):
-            segment2_value |= 0x01
+            control_flags2 |= 0x01
         if controls.get('outside_control', True):  # Default true
-            segment2_value |= 0x02
-
-        segments['segment1'] = f"{segment1_value:02x}"
-        segments['segment2'] = f"{segment2_value:02x}"
-        segments['segment3'] = format(self.power_on_off.value, "02x")
-        segments['segment4'] = format(self.drive_mode.value, "02x")
-        segments['segment6'] = f"{self.wind_speed:02x}"
-        segments['segment7'] = f"{self.vertical_wind_direction.value:02x}"
-        segments['segment13'] = f"{self.horizontal_wind_direction.value:02x}"
-        segments['segment15'] = '41'  # checkInside: 41 true, 42 false
-
-        segments['segment5'] = format(self._to_coarse_temperature(self.coarse_temperature), "02x")
-        segments['segment14'] = format(self._to_fine_temperature(self.fine_temperature), "02x")
+            control_flags2 |= 0x02
 
         # Build payload
-        payload = '41013010'
-        for i in range(16):
-            segment_key = f'segment{i}'
-            payload += segments.get(segment_key, '00')
+        payload = b'\x41\x01\x30\x10'
+        payload += b'\x01'
+        payload += control_flags.to_bytes(1)
+        payload += control_flags2.to_bytes(1)
+        payload += self.power_on_off.value.to_bytes(1)
+        payload += self.drive_mode.value.to_bytes(1)
+        payload += self._to_coarse_temperature(self.coarse_temperature).to_bytes(1)
+        payload += self.wind_speed.to_bytes(1)
+        payload += self.vertical_wind_direction.value.to_bytes(1)
+        payload += b'\0' * 5
+        payload += self.horizontal_wind_direction.value.to_bytes(1)
+        payload += self._to_fine_temperature(self.fine_temperature).to_bytes(1)
+        payload += b'\x41'
 
         # Calculate and append FCC
-        fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
-        return "fc" + payload + fcc
+        fcc = calc_fcc(payload).to_bytes(1)
+        return b"\xfc" + payload + fcc
 
-    def generate_extend08_command(self: GeneralStates, controls: Dict[str, bool]) -> str:
+    def generate_extend08_command(self: GeneralStates, controls: Dict[str, bool]) -> bytes:
         """Generate extend08 command for buzzer, dehum, power saving, etc."""
         segment_x_value = 0
         if controls.get('dehum'):
@@ -196,15 +178,16 @@ class GeneralStates:
         if controls.get('wind_and_wind_break'):
             segment_x_value |= 0x20
 
-        segment_x = f"{segment_x_value:02x}"
-        segment_y = f"{self.dehum_setting:02x}" if controls.get('dehum') else '00'
-        segment_z = '0A' if self.is_power_saving else '00'
-        segment_a = f"{self.wind_and_wind_break_direct:02x}" if controls.get('wind_and_wind_break') else '00'
-        buzzer_segment = '01' if controls.get('buzzer') else '00'
-
-        payload = "4101301008" + segment_x + "0000" + segment_y + segment_z + segment_a + buzzer_segment + "0000000000000000"
-        fcc = format(calc_fcc(bytes.fromhex(payload)), "02x")
-        return 'fc' + payload + fcc
+        payload = b"\x41\x01\x30\x10\x08"
+        payload += segment_x_value.to_bytes(1)
+        payload += b"\0\0"
+        payload += (self.dehum_setting if controls.get('dehum') else 0).to_bytes(1)
+        payload += b'\x0a' if self.is_power_saving else b'\x00'
+        payload += (self.wind_and_wind_break_direct if controls.get('wind_and_wind_break') else 0).to_bytes(1)
+        payload += b'\x01' if controls.get('buzzer') else b'\x00'
+        payload += b"\x00" * 8
+        fcc = calc_fcc(payload).to_bytes(1)
+        return b'\xfc' + payload + fcc
 
     @staticmethod
     def _from_coarse_temperature(value: int) -> int:

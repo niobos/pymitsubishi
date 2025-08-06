@@ -32,11 +32,11 @@ def test_fcc(payload, expected):
 
 def test_generate_general_command():
     command = GeneralStates().generate_general_command({})
-    assert command == "fc410130100100020000090000000000000000ac4185"
+    assert command.hex() == "fc410130100100020000090000000000000000ac4185"
 
 def test_generate_extend08_command():
     command = GeneralStates().generate_extend08_command({})
-    assert command == "fc410130100800000000000000000000000000000076"
+    assert command.hex() == "fc410130100800000000000000000000000000000076"
 
 def test_parse_sensor_states():
     states = SensorStates.deserialize(bytes.fromhex('fc620130100300000f00b4b2b2fe420001141a0000c4'))
