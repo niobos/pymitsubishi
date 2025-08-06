@@ -62,23 +62,23 @@ class GeneralStates:
     fine_temperature: float | None = 22.0
     wind_speed: WindSpeed = 0
     vertical_wind_direction: VerticalWindDirection = VerticalWindDirection.AUTO
-    horizontal_wind_direction: HorizontalWindDirection | None = HorizontalWindDirection.AUTO
-    dehum_setting: int | None = 0
-    is_power_saving: bool | None = False
-    wind_and_wind_break_direct: int | None = 0
+    horizontal_wind_direction: HorizontalWindDirection = HorizontalWindDirection.AUTO
+    dehum_setting: int  = 0
+    is_power_saving: bool  = False
+    wind_and_wind_break_direct: int  = 0
     # Enhanced functionality based on SwiCago insights
     i_see_sensor: bool = False  # i-See sensor active flag
     mode_raw_value: int = 0     # Raw mode value before i-See processing
-    wide_vane_adjustment: bool | None = False  # Wide vane adjustment flag (SwiCago wideVaneAdj)
+    wide_vane_adjustment: bool = False  # Wide vane adjustment flag (SwiCago wideVaneAdj)
     temp_mode: bool = False     # Direct temperature mode flag (SwiCago tempMode)
     undocumented_flags: Dict[str, Any] = None  # Store unknown bit patterns for analysis
 
     @staticmethod
-    def is_general_states_payload(payload: bytes) -> bool:
+    def is_general_states_payload(data: bytes) -> bool:
         """Check if payload contains general states data"""
-        if len(payload) < 6:
+        if len(data) < 6:
             return False
-        return payload[1] in [0x62, 0x7b] and payload[5] == 0x02
+        return data[1] in [0x62, 0x7b] and data[5] == 0x02
 
     @classmethod
     def deserialize(cls, data: bytes) -> GeneralStates:
@@ -91,113 +91,40 @@ class GeneralStates:
             raise ValueError(f"Checksum mismatch: got 0x{data[-1]:02x}, expected 0x{calculated_fcc:02x}")
 
         obj = cls.__new__(cls)
-        payload = data.hex()
 
         # Compared to the SwiCago implementation, we have an offset of 5:
         # SwiCago's data[0] is our data[5]
+        obj._unknown0 = data[0:8]
 
         obj.power_on_off = PowerOnOff(data[8])
 
         # Enhanced mode parsing with i-See sensor detection
         obj.drive_mode = DriveMode(data[9] & 0x07)
         obj.i_see_sensor = bool(data[9] & 0x08)
+        obj._unknown9 = data[9] & 0xF0
 
         obj.coarse_temperature = cls._from_coarse_temperature(data[10])
 
         obj.wind_speed = WindSpeed(data[11])
         obj.vertical_wind_direction = VerticalWindDirection(data[12])
 
-        if len(data) >= 16:
-            wide_vane_data = data[15]
-            obj.horizontal_wind_direction = HorizontalWindDirection(wide_vane_data & 0x0F)  # Lower 4 bits
-            obj.wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
-        else:
-            obj.horizontal_wind_direction = None
-            obj.wide_vane_adjustment = None
+        obj._unknown13 = data[13:15]
 
-        if len(data) >= 17 and data[16] != 0x00:
-            obj.fine_temperature = cls._from_fine_temperature(data[16])
-        else:
-            obj.fine_temperature = None
+        wide_vane_data = data[15]
+        obj.horizontal_wind_direction = HorizontalWindDirection(wide_vane_data & 0x0F)  # Lower 4 bits
+        obj.wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
 
-        if len(data) >= 18:
-            obj.dehum_setting = data[17]
-        else:
-            obj.dehum_setting = None
+        obj.fine_temperature = cls._from_fine_temperature(data[16])
 
-        if len(data) >= 19:
-            obj.is_power_saving = data[18] > 0
-        else:
-            obj.is_power_saving = None
+        obj.dehum_setting = data[17]
 
-        if len(data) >= 20:
-            obj.wind_and_wind_break_direct = data[19]
-        else:
-            obj.wind_and_wind_break_direct = None
+        obj.is_power_saving = data[18] > 0
 
-        # Analyze undocumented bits for research purposes
-        obj.undocumented_analysis = cls.analyze_undocumented_bits(payload)
+        obj.wind_and_wind_break_direct = data[19]
+
+        obj._unknown20 = data[20:]
 
         return obj
-
-    @staticmethod
-    def analyze_undocumented_bits(payload: str) -> Dict[str, Any]:
-        """Analyze payload for undocumented bit patterns and flags
-
-        This function helps identify unknown functionality by examining
-        bit patterns that haven't been documented yet.
-        """
-        analysis = {
-            'payload_length': len(payload),
-            'suspicious_patterns': [],
-            'high_bits_set': [],
-            'unknown_segments': {}
-        }
-
-        if len(payload) < 42:
-            return analysis
-
-        try:
-            # Examine each byte for unusual patterns
-            for i in range(0, min(len(payload), 42), 2):
-                if i + 2 <= len(payload):
-                    byte_hex = payload[i:i+2]
-                    byte_val = int(byte_hex, 16)
-                    position = i // 2
-
-                    # Look for high bits that might indicate additional flags
-                    if byte_val & 0x80:  # High bit set
-                        analysis['high_bits_set'].append({
-                            'position': position,
-                            'hex': byte_hex,
-                            'value': byte_val,
-                            'binary': f"{byte_val:08b}"
-                        })
-
-                    # Look for patterns that don't match known mappings
-                    if position == 9:  # Mode byte position
-                        if byte_val not in [0x00, 0x01, 0x02, 0x03, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x19, 0x1b]:
-                            analysis['suspicious_patterns'].append({
-                                'type': 'unknown_mode',
-                                'position': position,
-                                'hex': byte_hex,
-                                'value': byte_val,
-                                'possible_i_see': byte_val > 0x08
-                            })
-
-                    # Check for non-zero values in typically unused positions
-                    unused_positions = [12, 17, 19]  # Add more as we discover them
-                    if position in unused_positions and byte_val != 0:
-                        analysis['unknown_segments'][position] = {
-                            'hex': byte_hex,
-                            'value': byte_val,
-                            'binary': f"{byte_val:08b}"
-                        }
-
-        except (ValueError, IndexError) as e:
-            analysis['parse_error'] = str(e)
-
-        return analysis
 
     def generate_general_command(self, controls: Dict[str, bool]) -> str:
         """Generate general control command hex string"""
@@ -330,10 +257,18 @@ class SensorStates:
 
         obj = cls.__new__(cls)
 
+        obj._unknown0 = data[0:10]
         obj.outside_temperature = GeneralStates._from_fine_temperature(data[10])
+        obj._unknown11 = data[11]
         obj.room_temperature = GeneralStates._from_fine_temperature(data[12])
+        obj._unknown13 = data[13:19]
         obj.thermal_sensor = (data[19] & 0x01) != 0
+        obj._unknown19 = data[19] & 0xf7
         obj.wind_speed_pr557 = 1 if (data[20] & 0x01) == 1 else 0
+        obj._unknown20 = data[20] & 0xf7
+
+        if len(data) > 21:
+            obj._unknown21 = data[21:]
 
         return obj
 
@@ -343,7 +278,6 @@ class EnergyStates:
     """Parsed energy and operational states from device response"""
     compressor_frequency: Optional[int] = None  # Raw compressor frequency value
     operating: bool = False  # True if heat pump is actively operating
-    estimated_power_watts: Optional[float] = None  # Estimated power consumption in Watts
 
     @staticmethod
     def is_energy_states_payload(payload: bytes) -> bool:
@@ -374,77 +308,12 @@ class EnergyStates:
 
         obj = cls.__new__(cls)
 
-        # Extract compressor frequency from data[3] (position 18-19 in hex string)
-        obj.compressor_frequency = int(payload[18:20], 16)
-
-        # Extract operating status from data[4] (position 20-21 in hex string)
-        obj.operating = int(payload[20:22], 16) > 0
-
-        # Estimate power consumption if we have context
-        obj.estimated_power = None
-        if general_states:
-            obj.estimated_power = cls.estimate_power_consumption(
-                obj.compressor_frequency,
-                general_states.drive_mode,
-                general_states.wind_speed
-            )
+        obj._unknown0 = data[0:9]
+        obj.compressor_frequency = data[9]
+        obj.operating = data[10]
+        obj._unknown11 = data[11:]
 
         return obj
-
-    @staticmethod
-    def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_speed: WindSpeed) -> float:
-        """Estimate power consumption based on compressor frequency and operational parameters
-
-        This is a rough estimation based on empirical data from heat pump literature.
-        Actual consumption varies significantly based on outdoor conditions, efficiency rating, etc.
-
-        Args:
-            compressor_frequency: Raw compressor frequency value (0-255 typical)
-            mode: Operating mode (affects base consumption)
-            fan_speed: Fan speed (affects additional consumption)
-
-        Returns:
-            Estimated power consumption in Watts
-        """
-        if compressor_frequency == 0:
-            # Unit is not actively operating - only standby power
-            return 10.0  # Typical standby consumption
-
-        # Base power estimation from compressor frequency
-        # This is a rough linear approximation - real curves are more complex
-        frequency_factor = compressor_frequency / 255.0  # Normalize to 0-1
-
-        # Mode-based base consumption (typical values for residential units)
-        mode_base_watts = {
-            DriveMode.COOLER: 1200,     # Cooling tends to use more power
-            DriveMode.HEATER: 1000,     # Heating can be more efficient
-            DriveMode.AUTO: 1100,       # Average
-            DriveMode.DEHUM: 800,       # Dehumidification uses less
-            DriveMode.FAN: 50,          # Fan only
-            DriveMode.AUTO_COOLER: 1200,
-            DriveMode.AUTO_HEATER: 1000,
-        }
-
-        base_power = mode_base_watts.get(mode, 1000)
-
-        # Compressor power scales roughly with frequency
-        compressor_power = base_power * frequency_factor
-
-        # Fan power addition
-        fan_power_map = {
-            0: 50,      # Variable
-            1: 30,   # Low speed
-            2: 60,   # Medium-low
-            3: 90,   # Medium-high
-            4: 120, # High speed
-        }
-
-        fan_power = fan_power_map.get(fan_speed, 50)
-
-        # Total estimated power
-        total_power = compressor_power + fan_power + 20  # +20W for control electronics
-
-        return round(total_power, 1)
 
 
 @dataclass 
@@ -498,14 +367,6 @@ class ParsedDeviceState:
         parsed_state = ParsedDeviceState()
 
         for value in code_values:
-            hex_value = value.hex()
-            if not hex_value or len(hex_value) < 20:
-                continue
-
-            hex_lower = hex_value.lower()
-            if not all(c in '0123456789abcdef' for c in hex_lower):
-                continue
-
             # Parse different payload types
             if GeneralStates.is_general_states_payload(value):
                 parsed_state.general = GeneralStates.deserialize(value)
@@ -572,6 +433,56 @@ class ParsedDeviceState:
             }
             
         return result
+
+    def estimate_power_consumption(self) -> float:
+        """Estimate power consumption based on compressor frequency and operational parameters
+
+        This is a rough estimation based on empirical data from heat pump literature.
+        Actual consumption varies significantly based on outdoor conditions, efficiency rating, etc.
+
+        Returns:
+            Estimated power consumption in Watts
+        """
+        if self.energy.compressor_frequency == 0:
+            # Unit is not actively operating - only standby power
+            return 10.0  # Typical standby consumption
+
+        # Base power estimation from compressor frequency
+        # This is a rough linear approximation - real curves are more complex
+        frequency_factor = self.energy.compressor_frequency / 255.0  # Normalize to 0-1
+
+        # Mode-based base consumption (typical values for residential units)
+        mode_base_watts = {
+            DriveMode.COOLER: 1200,     # Cooling tends to use more power
+            DriveMode.HEATER: 1000,     # Heating can be more efficient
+            DriveMode.AUTO: 1100,       # Average
+            DriveMode.DEHUM: 800,       # Dehumidification uses less
+            DriveMode.FAN: 50,          # Fan only
+            DriveMode.AUTO_COOLER: 1200,
+            DriveMode.AUTO_HEATER: 1000,
+        }
+
+        base_power = mode_base_watts.get(self.general.drive_mode, 1000)
+
+        # Compressor power scales roughly with frequency
+        compressor_power = base_power * frequency_factor
+
+        # Fan power addition
+        fan_power_map = {
+            0: 50,      # Variable
+            1: 30,   # Low speed
+            2: 60,   # Medium-low
+            3: 90,   # Medium-high
+            4: 120, # High speed
+        }
+
+        fan_power = fan_power_map.get(self.general.wind_speed, 50)
+
+        # Total estimated power
+        total_power = compressor_power + fan_power + 20  # +20W for control electronics
+
+        return round(total_power, 1)
+
 
 def calc_fcc(payload: bytes) -> int:
     """Calculate FCC checksum for Mitsubishi protocol payload"""
