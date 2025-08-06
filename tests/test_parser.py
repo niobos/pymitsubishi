@@ -8,8 +8,8 @@ collected from real Mitsubishi MAC-577IF-2E devices.
 import pytest
 from pymitsubishi.mitsubishi_parser import (
     calc_fcc, convert_temperature, convert_temperature_to_segment,
-    get_normalized_temperature, get_on_off_status, get_drive_mode,
-    get_wind_speed, PowerOnOff, DriveMode, WindSpeed,
+    get_normalized_temperature,
+    PowerOnOff, DriveMode, WindSpeed,
     VerticalWindDirection, HorizontalWindDirection,
     parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command
 )
@@ -84,7 +84,7 @@ class TestModeAndStatusParsing:
         power_codes = ["00", "01", "02", "03", "ff"]
         
         for code in power_codes:
-            status = get_on_off_status(code)
+            status = PowerOnOff.from_segment(code)
             assert status in [PowerOnOff.ON, PowerOnOff.OFF]
             
             # Codes 01 and 02 should be ON, others typically OFF
@@ -109,7 +109,7 @@ class TestModeAndStatusParsing:
         }
         
         for code, expected_mode in mode_mappings.items():
-            parsed_mode = get_drive_mode(code)
+            parsed_mode = DriveMode.from_segment(code)
             assert parsed_mode == expected_mode
     
     def test_wind_speed_parsing(self):
@@ -118,7 +118,7 @@ class TestModeAndStatusParsing:
         speed_codes = ["00", "01", "02", "03", "05", "ff"]
         
         for code in speed_codes:
-            speed = get_wind_speed(code)
+            speed = WindSpeed.from_segment(code)
             assert isinstance(speed, WindSpeed)
             assert speed in [WindSpeed.AUTO, WindSpeed.LEVEL_1, WindSpeed.LEVEL_2, 
                            WindSpeed.LEVEL_3, WindSpeed.LEVEL_FULL]

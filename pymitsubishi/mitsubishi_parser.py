@@ -6,6 +6,7 @@ This module contains all the parsing logic for Mitsubishi AC protocol payloads,
 including enums, state classes, and functions for decoding hex values.
 """
 
+from __future__ import annotations
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
@@ -18,6 +19,13 @@ class PowerOnOff(Enum):
     OFF = '00'
     ON = '01'
 
+    @classmethod
+    def from_segment(cls, segment: str) -> PowerOnOff:
+        if segment in ['01', '02']:
+            return PowerOnOff.ON
+        else:
+            return PowerOnOff.OFF
+
 class DriveMode(Enum):
     HEATER = '01'
     DEHUM = '02' 
@@ -27,12 +35,35 @@ class DriveMode(Enum):
     AUTO_HEATER = '19'
     FAN = '07'
 
+    @classmethod
+    def from_segment(cls, segment: str) -> DriveMode:
+        mode_map = {
+            '03': DriveMode.COOLER, '0b': DriveMode.COOLER,
+            '01': DriveMode.HEATER, '09': DriveMode.HEATER,
+            '08': DriveMode.AUTO,
+            '00': DriveMode.DEHUM, '02': DriveMode.DEHUM, '0a': DriveMode.DEHUM, '0c': DriveMode.DEHUM,
+            '1b': DriveMode.AUTO_COOLER,
+            '19': DriveMode.AUTO_HEATER,
+        }
+        return mode_map.get(segment, DriveMode.FAN)
+
 class WindSpeed(Enum):
     AUTO = 0
     LEVEL_1 = 1
     LEVEL_2 = 2
     LEVEL_3 = 3
     LEVEL_FULL = 5
+
+    @classmethod
+    def from_segment(cls, segment: str) -> WindSpeed:
+        speed_map = {
+            '00': WindSpeed.AUTO,
+            '01': WindSpeed.LEVEL_1,
+            '02': WindSpeed.LEVEL_2,
+            '03': WindSpeed.LEVEL_3,
+            '05': WindSpeed.LEVEL_FULL,
+        }
+        return speed_map.get(segment, WindSpeed.AUTO)
 
 class VerticalWindDirection(Enum):
     AUTO = 0
@@ -42,6 +73,19 @@ class VerticalWindDirection(Enum):
     V4 = 4
     V5 = 5
     SWING = 7
+
+    @classmethod
+    def from_segment(cls, segment: str) -> VerticalWindDirection:
+        direction_map = {
+            '00': VerticalWindDirection.AUTO,
+            '01': VerticalWindDirection.V1,
+            '02': VerticalWindDirection.V2,
+            '03': VerticalWindDirection.V3,
+            '04': VerticalWindDirection.V4,
+            '05': VerticalWindDirection.V5,
+            '07': VerticalWindDirection.SWING,
+        }
+        return direction_map.get(segment, VerticalWindDirection.AUTO)
 
 class HorizontalWindDirection(Enum):
     AUTO = 0
@@ -55,6 +99,14 @@ class HorizontalWindDirection(Enum):
     LR = 8
     LCR = 9
     LCR_S = 12
+
+    @classmethod
+    def from_segment(cls, segment: str) -> HorizontalWindDirection:
+        value = int(segment, 16) & 0x7F  # 127 & value
+        try:
+            return HorizontalWindDirection(value)
+        except ValueError:
+            return HorizontalWindDirection.AUTO
 
 @dataclass
 class GeneralStates:
@@ -189,25 +241,6 @@ def get_normalized_temperature(hex_value: int) -> int:
     else:
         return adjusted
 
-def get_on_off_status(segment: str) -> PowerOnOff:
-    """Parse power on/off status from segment"""
-    if segment in ['01', '02']:
-        return PowerOnOff.ON
-    else:
-        return PowerOnOff.OFF
-
-def get_drive_mode(segment: str) -> DriveMode:
-    """Parse drive mode from segment"""
-    mode_map = {
-        '03': DriveMode.COOLER, '0b': DriveMode.COOLER,
-        '01': DriveMode.HEATER, '09': DriveMode.HEATER,
-        '08': DriveMode.AUTO,
-        '00': DriveMode.DEHUM, '02': DriveMode.DEHUM, '0a': DriveMode.DEHUM, '0c': DriveMode.DEHUM,
-        '1b': DriveMode.AUTO_COOLER,
-        '19': DriveMode.AUTO_HEATER,
-    }
-    return mode_map.get(segment, DriveMode.FAN)
-
 def parse_mode_with_i_see(mode_byte: int) -> tuple[DriveMode, bool, int]:
     """Parse drive mode considering i-See sensor flag (SwiCago enhancement)
     
@@ -229,7 +262,7 @@ def parse_mode_with_i_see(mode_byte: int) -> tuple[DriveMode, bool, int]:
     
     # Map the mode value to DriveMode enum
     mode_hex = f"{actual_mode_value:02x}"
-    drive_mode = get_drive_mode(mode_hex)
+    drive_mode = DriveMode.from_segment(mode_hex)
     
     return drive_mode, i_see_active, mode_byte
 
@@ -290,38 +323,6 @@ def analyze_undocumented_bits(payload: str) -> Dict[str, Any]:
         analysis['parse_error'] = str(e)
     
     return analysis
-
-def get_wind_speed(segment: str) -> WindSpeed:
-    """Parse wind speed from segment"""
-    speed_map = {
-        '00': WindSpeed.AUTO,
-        '01': WindSpeed.LEVEL_1,
-        '02': WindSpeed.LEVEL_2,
-        '03': WindSpeed.LEVEL_3,
-        '05': WindSpeed.LEVEL_FULL,
-    }
-    return speed_map.get(segment, WindSpeed.AUTO)
-
-def get_vertical_wind_direction(segment: str) -> VerticalWindDirection:
-    """Parse vertical wind direction from segment"""
-    direction_map = {
-        '00': VerticalWindDirection.AUTO,
-        '01': VerticalWindDirection.V1,
-        '02': VerticalWindDirection.V2,
-        '03': VerticalWindDirection.V3,
-        '04': VerticalWindDirection.V4,
-        '05': VerticalWindDirection.V5,
-        '07': VerticalWindDirection.SWING,
-    }
-    return direction_map.get(segment, VerticalWindDirection.AUTO)
-
-def get_horizontal_wind_direction(segment: str) -> HorizontalWindDirection:
-    """Parse horizontal wind direction from segment"""
-    value = int(segment, 16) & 0x7F  # 127 & value
-    try:
-        return HorizontalWindDirection(value)
-    except ValueError:
-        return HorizontalWindDirection.AUTO
 
 def is_general_states_payload(payload: str) -> bool:
     """Check if payload contains general states data"""
@@ -451,7 +452,7 @@ def parse_general_states(payload: str) -> Optional[GeneralStates]:
         return None
     
     try:
-        power_on_off = get_on_off_status(payload[16:18])
+        power_on_off = PowerOnOff.from_segment(payload[16:18])
         
         # Enhanced temperature parsing (SwiCago logic)
         # Check for direct temperature mode first (data[11] != 0x00)
@@ -482,13 +483,13 @@ def parse_general_states(payload: str) -> Optional[GeneralStates]:
         mode_byte = int(payload[18:20], 16)  # data[4] in SwiCago
         drive_mode, i_see_active, raw_mode = parse_mode_with_i_see(mode_byte)
         
-        wind_speed = get_wind_speed(payload[22:24])  # data[6] in SwiCago
-        right_vertical_wind_direction = get_vertical_wind_direction(payload[24:26])  # data[7] in SwiCago
-        left_vertical_wind_direction = get_vertical_wind_direction(payload[40:42])
+        wind_speed = WindSpeed.from_segment(payload[22:24])  # data[6] in SwiCago
+        right_vertical_wind_direction = VerticalWindDirection.from_segment(payload[24:26])  # data[7] in SwiCago
+        left_vertical_wind_direction = VerticalWindDirection.from_segment(payload[40:42])
         
         # Enhanced wide vane parsing with adjustment flag (SwiCago)
         wide_vane_data = int(payload[30:32], 16) if len(payload) > 31 else 0  # data[10] in SwiCago
-        horizontal_wind_direction = get_horizontal_wind_direction(f"{wide_vane_data & 0x0F:02x}")  # Lower 4 bits
+        horizontal_wind_direction = HorizontalWindDirection.from_segment(f"{wide_vane_data & 0x0F:02x}")  # Lower 4 bits
         wide_vane_adjustment = (wide_vane_data & 0xF0) == 0x80  # Upper 4 bits = 0x80
         
         # Extra states
