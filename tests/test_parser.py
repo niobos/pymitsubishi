@@ -45,6 +45,7 @@ def test_sensor_temperature():
 
 def test_parse_general_states():
     states = parse_general_states(bytes.fromhex('fc620130100200000003080000000083ae46000000d9'))
+    assert states.temperature == 23.0
     assert states.drive_mode == DriveMode.COOLER
 
 def test_parse_sensor_states():

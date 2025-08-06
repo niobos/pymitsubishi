@@ -323,29 +323,29 @@ def analyze_undocumented_bits(payload: str) -> Dict[str, Any]:
     
     return analysis
 
-def is_general_states_payload(payload: str) -> bool:
+def is_general_states_payload(payload: bytes) -> bool:
     """Check if payload contains general states data"""
-    if len(payload) < 12:
+    if len(payload) < 6:
         return False
-    return payload[2:4] in ['62', '7b'] and payload[10:12] == '02'
+    return payload[1] in [0x62, 0x7b] and payload[5] == 0x02
 
-def is_sensor_states_payload(payload: str) -> bool:
+def is_sensor_states_payload(payload: bytes) -> bool:
     """Check if payload contains sensor states data"""
-    if len(payload) < 12:
+    if len(payload) < 6:
         return False
-    return payload[2:4] in ['62', '7b'] and payload[10:12] == '03'
+    return payload[1] in [0x62, 0x7b] and payload[5] == 0x03
 
-def is_error_states_payload(payload: str) -> bool:
+def is_error_states_payload(payload: bytes) -> bool:
     """Check if payload contains error states data"""
-    if len(payload) < 12:
+    if len(payload) < 6:
         return False
-    return payload[2:4] in ['62', '7b'] and payload[10:12] == '04'
+    return payload[1] in [0x62, 0x7b] and payload[5] == 0x04
 
-def is_energy_states_payload(payload: str) -> bool:
+def is_energy_states_payload(payload: bytes) -> bool:
     """Check if payload contains energy/status data (SwiCago group 06)"""
-    if len(payload) < 12:
+    if len(payload) < 6:
         return False
-    return payload[2:4] in ['62', '7b'] and payload[10:12] == '06'
+    return payload[1] in [0x62, 0x7b] and payload[5] == 0x06
 
 def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_speed: WindSpeed) -> float:
     """Estimate power consumption based on compressor frequency and operational parameters
@@ -401,7 +401,7 @@ def estimate_power_consumption(compressor_frequency: int, mode: DriveMode, fan_s
     
     return round(total_power, 1)
 
-def parse_energy_states(payload: str, general_states: Optional[GeneralStates] = None) -> Optional[EnergyStates]:
+def parse_energy_states(payload_b: bytes, general_states: Optional[GeneralStates] = None) -> Optional[EnergyStates]:
     """Parse energy/status states from hex payload (SwiCago group 06)
     
     Based on SwiCago implementation:
@@ -409,9 +409,10 @@ def parse_energy_states(payload: str, general_states: Optional[GeneralStates] = 
     - data[4] = operating status (boolean)
     
     Args:
-        payload: Hex payload string
+        payload_b: payload bytes
         general_states: Optional general states for power estimation context
     """
+    payload = payload_b.hex()
     if len(payload) < 24:  # Need at least enough bytes for data[4]
         return None
     
@@ -539,8 +540,9 @@ def parse_sensor_states(payload: bytes) -> Optional[SensorStates]:
     except (ValueError, IndexError):
         return None
 
-def parse_error_states(payload: str) -> Optional[ErrorStates]:
+def parse_error_states(payload_b: bytes) -> Optional[ErrorStates]:
     """Parse error states from hex payload"""
+    payload = payload_b.hex()
     if len(payload) < 22:
         return None
     
@@ -571,15 +573,15 @@ def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
             continue
             
         # Parse different payload types
-        if is_general_states_payload(hex_lower):
+        if is_general_states_payload(value):
             parsed_state.general = parse_general_states(value)
-        elif is_sensor_states_payload(hex_lower):
+        elif is_sensor_states_payload(value):
             parsed_state.sensors = parse_sensor_states(value)
-        elif is_error_states_payload(hex_lower):
-            parsed_state.errors = parse_error_states(hex_lower)
-        elif is_energy_states_payload(hex_lower):
+        elif is_error_states_payload(value):
+            parsed_state.errors = parse_error_states(value)
+        elif is_energy_states_payload(value):
             # Parse energy states with context from general states if available
-            parsed_state.energy = parse_energy_states(hex_lower, parsed_state.general)
+            parsed_state.energy = parse_energy_states(value, parsed_state.general)
     
     return parsed_state
 
