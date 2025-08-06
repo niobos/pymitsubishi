@@ -108,6 +108,35 @@ class HorizontalWindDirection(Enum):
         except ValueError:
             return HorizontalWindDirection.AUTO
 
+class MitsubishiOutsideTemperature(float):
+    @classmethod
+    def from_segment(cls, segment: int) -> MitsubishiOutsideTemperature:
+        t = (segment - 0x80) * 0.5
+        # TODO: should we cap to 0<=t<=40.0 ?
+        return MitsubishiOutsideTemperature(t)
+
+def convert_temperature(temperature: int) -> str:
+    """Convert temperature in 0.1°C units to segment format"""
+    t = max(MIN_TEMPERATURE, min(MAX_TEMPERATURE, temperature))
+    e = 31 - (t // 10)
+    last_digit = '0' if str(t)[-1] == '0' else '1'
+    return last_digit + format(e, 'x')
+
+def convert_temperature_to_segment(temperature: int) -> str:
+    """Convert temperature to segment 14 format"""
+    value = 0x80 + (temperature // 5)
+    return format(value, '02x')
+
+def get_normalized_temperature(hex_value: int) -> int:
+    """Normalize temperature from hex value to 0.1°C units"""
+    adjusted = 5 * (hex_value - 0x80)
+    if adjusted >= 400:
+        return 400
+    elif adjusted <= 0:
+        return 0
+    else:
+        return adjusted
+
 @dataclass
 class GeneralStates:
     """Parsed general AC states from device response"""
@@ -131,7 +160,7 @@ class GeneralStates:
 @dataclass
 class SensorStates:
     """Parsed sensor states from device response"""
-    outside_temperature: Optional[int] = None
+    outside_temperature: float | None = None
     room_temperature: int = 220  # 22.0°C in 0.1°C units
     thermal_sensor: bool = False
     wind_speed_pr557: int = 0
@@ -195,7 +224,7 @@ class ParsedDeviceState:
         if self.sensors:
             result['sensor_states'] = {
                 'room_temperature_celsius': self.sensors.room_temperature / 10.0,
-                'outside_temperature_celsius': self.sensors.outside_temperature / 10.0 if self.sensors.outside_temperature else None,
+                'outside_temperature_celsius': self.sensors.outside_temperature,
                 'thermal_sensor_active': self.sensors.thermal_sensor,
                 'wind_speed_pr557': self.sensors.wind_speed_pr557,
             }
@@ -218,28 +247,6 @@ class ParsedDeviceState:
 def calc_fcc(payload: bytes) -> int:
     """Calculate FCC checksum for Mitsubishi protocol payload"""
     return 0x100 - (sum(payload[0:20]) % 0x100)  # TODO: do we actually need to limit this to 20 bytes?
-
-def convert_temperature(temperature: int) -> str:
-    """Convert temperature in 0.1°C units to segment format"""
-    t = max(MIN_TEMPERATURE, min(MAX_TEMPERATURE, temperature))
-    e = 31 - (t // 10)
-    last_digit = '0' if str(t)[-1] == '0' else '1'
-    return last_digit + format(e, 'x')
-
-def convert_temperature_to_segment(temperature: int) -> str:
-    """Convert temperature to segment 14 format"""
-    value = 0x80 + (temperature // 5)
-    return format(value, '02x')
-
-def get_normalized_temperature(hex_value: int) -> int:
-    """Normalize temperature from hex value to 0.1°C units"""
-    adjusted = 5 * (hex_value - 0x80)
-    if adjusted >= 400:
-        return 400
-    elif adjusted <= 0:
-        return 0
-    else:
-        return adjusted
 
 def parse_mode_with_i_see(mode_byte: int) -> tuple[DriveMode, bool, int]:
     """Parse drive mode considering i-See sensor flag (SwiCago enhancement)
@@ -521,17 +528,16 @@ def parse_general_states(payload: str) -> Optional[GeneralStates]:
     except (ValueError, IndexError):
         return None
 
-def parse_sensor_states(payload: str) -> Optional[SensorStates]:
-    """Parse sensor states from hex payload"""
-    if len(payload) < 42:
+def parse_sensor_states(payload: bytes) -> Optional[SensorStates]:
+    if len(payload) < 21:
         return None
     
     try:
-        outside_temp_raw = int(payload[20:22], 16)
-        outside_temperature = None if outside_temp_raw < 16 else get_normalized_temperature(outside_temp_raw)
-        room_temperature = get_normalized_temperature(int(payload[24:26], 16))
-        thermal_sensor = (int(payload[38:40], 16) & 0x01) != 0
-        wind_speed_pr557 = 1 if (int(payload[40:42], 16) & 0x01) == 1 else 0
+        outside_temp_raw = payload[10]
+        outside_temperature = MitsubishiOutsideTemperature.from_segment(payload[10])
+        room_temperature = get_normalized_temperature(payload[12])
+        thermal_sensor = (payload[19] & 0x01) != 0
+        wind_speed_pr557 = 1 if (payload[20] & 0x01) == 1 else 0
         
         return SensorStates(
             outside_temperature=outside_temperature,
@@ -577,7 +583,7 @@ def parse_code_values(code_values: List[bytes]) -> ParsedDeviceState:
         if is_general_states_payload(hex_lower):
             parsed_state.general = parse_general_states(hex_lower)
         elif is_sensor_states_payload(hex_lower):
-            parsed_state.sensors = parse_sensor_states(hex_lower)
+            parsed_state.sensors = parse_sensor_states(value)
         elif is_error_states_payload(hex_lower):
             parsed_state.errors = parse_error_states(hex_lower)
         elif is_energy_states_payload(hex_lower):

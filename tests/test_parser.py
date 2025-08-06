@@ -11,7 +11,8 @@ from pymitsubishi.mitsubishi_parser import (
     get_normalized_temperature,
     PowerOnOff, DriveMode, WindSpeed,
     VerticalWindDirection, HorizontalWindDirection,
-    parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command
+    parse_code_values, GeneralStates, ParsedDeviceState, generate_general_command, generate_extend08_command,
+    MitsubishiOutsideTemperature, parse_sensor_states
 )
 
 from .test_fixtures import SAMPLE_CODE_VALUES, SAMPLE_PROFILE_CODES
@@ -38,6 +39,14 @@ def test_generate_general_command():
 def test_generate_extend08_command():
     command = generate_extend08_command(GeneralStates(), {})
     assert command == "fc410130100800000000000000000000000000000076"
+
+def test_outside_temperature():
+    t = MitsubishiOutsideTemperature.from_segment(182)
+    assert t == 27.0
+
+def test_parse_sensor_states():
+    states = parse_sensor_states(bytes.fromhex('fc620130100300000f00b4b2b2fe420001141a0000c4'))
+    assert states.outside_temperature == 26.0
 
 class TestTemperatureConversion:
     """Test temperature conversion functions with real values."""

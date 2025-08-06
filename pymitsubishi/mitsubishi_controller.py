@@ -333,7 +333,7 @@ class MitsubishiController:
         if self.state.sensors:
             summary.update({
                 'room_temp': self.state.sensors.room_temperature / 10.0,
-                'outside_temp': self.state.sensors.outside_temperature / 10.0 if self.state.sensors.outside_temperature else None,
+                'outside_temp': self.state.sensors.outside_temperature,
             })
             
         if self.state.errors:
